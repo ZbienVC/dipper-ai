@@ -470,25 +470,33 @@ async function startServer() {
 
     const model = requestedModel || 'gemini-1.5-flash';
 
-    // Route by model
-    if (model.startsWith('gpt')) {
-      return res.status(501).json({ error: 'OpenAI not configured yet' });
-    }
-    if (model.startsWith('claude')) {
-      return res.status(501).json({ error: 'Anthropic not configured yet' });
-    }
+    // Build message history
+    const recentHistory: any[] = (conversationHistory as any[]).slice(-10);
+    const messages = recentHistory.map((m: any) => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.text || m.content || '',
+    }));
+    messages.push({ role: 'user', content: message });
 
-    // Gemini
-    const geminiModel = model.includes('gemini') ? model : 'gemini-1.5-flash';
     try {
-      const recentHistory: any[] = (conversationHistory as any[]).slice(-10);
-      const messages = recentHistory.map((m: any) => ({
-        role: m.role === 'user' ? 'user' : 'assistant',
-        content: m.text || m.content || '',
-      }));
-      messages.push({ role: 'user', content: message });
+      let content: string;
 
-      const { content } = await callAI('google', geminiModel, systemPrompt, messages);
+      // Route by model prefix
+      if (model.startsWith('gpt')) {
+        if (!process.env.OPENAI_API_KEY) return res.status(501).json({ error: 'OpenAI not configured' });
+        ({ content } = await callAI('openai', model, systemPrompt, messages));
+      } else if (model.startsWith('claude')) {
+        if (!process.env.ANTHROPIC_API_KEY) return res.status(501).json({ error: 'Anthropic not configured' });
+        ({ content } = await callAI('anthropic', model, systemPrompt, messages));
+      } else if (model.startsWith('sonar') || model.includes('perplexity') || model.includes('llama')) {
+        if (!process.env.PERPLEXITY_API_KEY) return res.status(501).json({ error: 'Perplexity not configured' });
+        ({ content } = await callAI('perplexity', model, systemPrompt, messages));
+      } else {
+        // Default: Gemini
+        const geminiModel = model.includes('gemini') ? model : 'gemini-1.5-flash';
+        ({ content } = await callAI('google', geminiModel, systemPrompt, messages));
+      }
+
       res.json({ reply: content });
     } catch (e: any) {
       res.status(500).json({ error: 'AI call failed: ' + e.message });
