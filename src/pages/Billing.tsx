@@ -1,5 +1,13 @@
 import DashboardLayout from '../components/DashboardLayout'
-import { Check, Zap } from 'lucide-react'
+import { Check, Zap, ShieldCheck } from 'lucide-react'
+
+function getUser() {
+  try {
+    const raw = localStorage.getItem('dipperai_user')
+    if (raw) return JSON.parse(raw) as { email: string; name: string; role?: string; plan?: string }
+  } catch {}
+  return { email: '', name: 'User' }
+}
 
 const PLANS = [
   {
@@ -36,6 +44,62 @@ const usageData = [
 ]
 
 export default function Billing() {
+  const user = getUser()
+  const isAdmin = user.role === 'admin'
+
+  if (isAdmin) {
+    return (
+      <DashboardLayout title="Billing">
+        <div className="mb-6">
+          <h1 className="text-2xl font-extrabold text-gray-900">Billing</h1>
+          <p className="text-gray-500 mt-1">Manage your plan and usage.</p>
+        </div>
+
+        {/* Admin Banner */}
+        <div className="rounded-2xl p-8 mb-8 flex items-center gap-5" style={{ background: 'linear-gradient(135deg, #F59E0B22, #D9770611)', border: '2px solid #F59E0B' }}>
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg, #F59E0B, #D97706)' }}>
+            <ShieldCheck size={26} className="text-white" />
+          </div>
+          <div>
+            <p className="text-xl font-extrabold text-gray-900">Admin Account — All Features Unlocked</p>
+            <p className="text-gray-500 mt-1 text-sm">You have unlimited access to all agents, messages, channels, and features.</p>
+          </div>
+        </div>
+
+        {/* Unlimited Usage */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-8">
+          <h2 className="font-bold text-gray-900 text-lg mb-5">Usage</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            {[
+              { label: 'Agents', value: '∞ Unlimited' },
+              { label: 'Messages', value: '∞ Unlimited' },
+              { label: 'Team Members', value: '∞ Unlimited' },
+            ].map(u => (
+              <div key={u.label}>
+                <div className="flex justify-between text-sm mb-1.5">
+                  <span className="font-semibold text-gray-700">{u.label}</span>
+                  <span className="font-bold" style={{ color: '#D97706' }}>{u.value}</span>
+                </div>
+                <div className="w-full rounded-full h-2.5" style={{ background: 'linear-gradient(90deg, #F59E0B, #D97706)' }} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100">
+            <h2 className="text-lg font-bold text-gray-900">Billing History</h2>
+          </div>
+          <div className="p-16 text-center">
+            <div className="text-5xl mb-4">🧾</div>
+            <h3 className="font-bold text-gray-700 mb-1">Admin accounts are not billed</h3>
+            <p className="text-gray-400 text-sm">No invoices for admin accounts.</p>
+          </div>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
   return (
     <DashboardLayout title="Billing">
       <div className="mb-6">

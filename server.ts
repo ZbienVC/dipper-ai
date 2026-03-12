@@ -448,6 +448,53 @@ async function startServer() {
     res.json({ agents, totalMessages, recentConversations });
   });
 
+  // ── Simple Chat (frontend test interface — no auth required) ─────────────────
+  app.post('/api/chat', async (req, res) => {
+    const { agentId: _agentId, message, conversationHistory = [], agentName, personality, model: requestedModel } = req.body;
+    if (!message) return res.status(400).json({ error: 'Message required' });
+
+    const name = agentName || 'AI Assistant';
+
+    // Build personality-aware system prompt
+    let systemPrompt = `You are ${name}.`;
+    if (personality) {
+      if (personality.bio) systemPrompt += ` ${personality.bio}`;
+      if (personality.adjectives?.length) systemPrompt += `\n\nYour personality: ${personality.adjectives.join(', ')}`;
+      if (personality.communicationStyle) systemPrompt += `\nYour communication style: ${personality.communicationStyle}`;
+      if (personality.topics?.length) systemPrompt += `\nTopics you specialize in: ${personality.topics.join(', ')}`;
+      if (personality.forbiddenWords) systemPrompt += `\nNever use these words or phrases: ${personality.forbiddenWords}`;
+      systemPrompt += '\n\nBe helpful, stay in character, and keep responses concise.';
+    } else {
+      systemPrompt += ' Be friendly, concise, and professional.';
+    }
+
+    const model = requestedModel || 'gemini-1.5-flash';
+
+    // Route by model
+    if (model.startsWith('gpt')) {
+      return res.status(501).json({ error: 'OpenAI not configured yet' });
+    }
+    if (model.startsWith('claude')) {
+      return res.status(501).json({ error: 'Anthropic not configured yet' });
+    }
+
+    // Gemini
+    const geminiModel = model.includes('gemini') ? model : 'gemini-1.5-flash';
+    try {
+      const recentHistory: any[] = (conversationHistory as any[]).slice(-10);
+      const messages = recentHistory.map((m: any) => ({
+        role: m.role === 'user' ? 'user' : 'assistant',
+        content: m.text || m.content || '',
+      }));
+      messages.push({ role: 'user', content: message });
+
+      const { content } = await callAI('google', geminiModel, systemPrompt, messages);
+      res.json({ reply: content });
+    } catch (e: any) {
+      res.status(500).json({ error: 'AI call failed: ' + e.message });
+    }
+  });
+
   // ─── Vite Dev Middleware (dev only) ──────────────────────────────────────────
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });

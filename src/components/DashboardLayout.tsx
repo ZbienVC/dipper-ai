@@ -23,10 +23,12 @@ interface Props {
   title?: string
 }
 
-function getUser() {
+interface AppUser { email: string; name: string; role?: string; plan?: string }
+
+function getUser(): AppUser {
   try {
     const raw = localStorage.getItem('dipperai_user')
-    if (raw) return JSON.parse(raw) as { email: string; name: string }
+    if (raw) return JSON.parse(raw) as AppUser
   } catch {}
   return { email: 'user@example.com', name: 'User' }
 }
@@ -105,8 +107,15 @@ export default function DashboardLayout({ children, title }: Props) {
               {initials}
             </div>
             <div className="flex-1 min-w-0 text-left">
-              <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
-              <p className="text-xs text-gray-500 truncate">Free Plan</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
+                {user.role === 'admin' && (
+                  <span className="text-xs font-bold px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ background: 'linear-gradient(135deg, #F59E0B, #D97706)', color: '#fff', fontSize: '9px', letterSpacing: '0.05em' }}>ADMIN</span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 truncate">
+                {user.role === 'admin' ? 'All Features Unlocked' : (user.plan ? `${user.plan.charAt(0).toUpperCase() + user.plan.slice(1)} Plan` : 'Free Plan')}
+              </p>
             </div>
             <ChevronDown size={14} className={`text-gray-400 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
           </button>

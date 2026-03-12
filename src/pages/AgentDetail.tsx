@@ -86,6 +86,12 @@ export default function AgentDetail() {
   const [editCommStyle, setEditCommStyle] = useState(agent.commStyle)
   const [saved, setSaved] = useState(false)
 
+  // Personality & model state
+  const [selectedModel, setSelectedModel] = useState('gemini-1.5-flash')
+  const [editAdjectives, setEditAdjectives] = useState('Helpful, Professional, Concise')
+  const [editTopics, setEditTopics] = useState(agent.template)
+  const [editForbiddenWords, setEditForbiddenWords] = useState('')
+
   // Chat state
   const [messages, setMessages] = useState<ChatMsg[]>([
     { role: 'agent', text: `Hey! I'm ${agent.name}. How can I help you today? 👋`, ts: '10:30 AM' },
@@ -127,17 +133,42 @@ export default function AgentDetail() {
     if (tab) setActiveTab(tab)
   }, [searchParams])
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!inputText.trim() || thinking) return
     const userMsg: ChatMsg = { role: 'user', text: inputText.trim(), ts: getTime() }
+    const currentInput = inputText.trim()
     setMessages(prev => [...prev, userMsg])
     setInputText('')
     setThinking(true)
-    setTimeout(() => {
-      const resp = MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)]
-      setMessages(prev => [...prev, { role: 'agent', text: resp, ts: getTime() }])
-      setThinking(false)
-    }, 1500)
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId: id,
+          message: currentInput,
+          conversationHistory: messages,
+          agentName: agent.name,
+          personality: {
+            bio: editBio,
+            adjectives: editAdjectives.split(',').map(s => s.trim()).filter(Boolean),
+            communicationStyle: editCommStyle,
+            topics: editTopics.split(',').map(s => s.trim()).filter(Boolean),
+            forbiddenWords: editForbiddenWords || undefined,
+          },
+          model: selectedModel,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok || data.error) {
+        setMessages(prev => [...prev, { role: 'agent', text: 'Sorry, I had trouble responding. Try again.', ts: getTime() }])
+      } else {
+        setMessages(prev => [...prev, { role: 'agent', text: data.reply, ts: getTime() }])
+      }
+    } catch {
+      setMessages(prev => [...prev, { role: 'agent', text: 'Sorry, I had trouble responding. Try again.', ts: getTime() }])
+    }
+    setThinking(false)
   }
 
   const handleSavePersonality = () => {
@@ -200,12 +231,18 @@ export default function AgentDetail() {
         <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${agent.avatarColor} flex items-center justify-center text-white font-bold text-sm`}>
           {agent.emoji}
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <p className="font-bold text-gray-900 text-sm">{agent.name}</p>
           <p className="text-xs text-green-500 font-medium flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" /> Online
           </p>
         </div>
+        <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-violet-50 text-violet-600 flex-shrink-0">
+          {selectedModel === 'gemini-1.5-flash' ? 'Gemini 1.5 Flash' :
+           selectedModel === 'gemini-1.5-pro' ? 'Gemini 1.5 Pro' :
+           selectedModel === 'gemini-2.0-flash' ? 'Gemini 2.0 Flash' :
+           selectedModel}
+        </span>
       </div>
       <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-slate-50">
         {messages.map((msg, i) => (
@@ -295,6 +332,66 @@ export default function AgentDetail() {
           </select>
         </div>
       </div>
+      <div>
+        <label className="block text-sm font-semibold text-gray-700 mb-2">Personality Traits <span className="text-gray-400 font-normal">(comma-separated)</span></label>
+        <input
+          type="text"
+          value={editAdjectives}
+          onChange={e => setEditAdjectives(e.target.value)}
+          placeholder="e.g. Helpful, Professional, Concise"
+          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 transition-all"
+        />
+      </div>
+      <div>
+        <label className="block text-sm font-semibold text-gray-700 mb-2">Topics / Specializations <span className="text-gray-400 font-normal">(comma-separated)</span></label>
+        <input
+          type="text"
+          value={editTopics}
+          onChange={e => setEditTopics(e.target.value)}
+          placeholder="e.g. Customer Support, Product FAQ, Billing"
+          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 transition-all"
+        />
+      </div>
+      <div>
+        <label className="block text-sm font-semibold text-gray-700 mb-2">Forbidden Words <span className="text-gray-400 font-normal">(optional)</span></label>
+        <input
+          type="text"
+          value={editForbiddenWords}
+          onChange={e => setEditForbiddenWords(e.target.value)}
+          placeholder="e.g. competitor names, sensitive terms"
+          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 transition-all"
+        />
+      </div>
+
+      {/* Model Selector */}
+      <div>
+        <label className="block text-sm font-semibold text-gray-700 mb-2">AI Model</label>
+        <select
+          value={selectedModel}
+          onChange={e => setSelectedModel(e.target.value)}
+          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+        >
+          <optgroup label="Google Gemini ✅ Active">
+            <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast &amp; Cheap)</option>
+            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Smart)</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash (Latest)</option>
+          </optgroup>
+          <optgroup label="OpenAI (key required)">
+            <option value="gpt-4o">GPT-4o</option>
+            <option value="gpt-4o-mini">GPT-4o Mini</option>
+          </optgroup>
+          <optgroup label="Anthropic (key required)">
+            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+            <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+          </optgroup>
+        </select>
+        <p className="text-xs text-gray-400 mt-1.5">
+          {selectedModel.includes('gemini') ? '✅ Gemini is active and ready to use.' :
+           selectedModel.startsWith('gpt') ? '⚠️ OpenAI key not configured. Chat will return an error.' :
+           selectedModel.startsWith('claude') ? '⚠️ Anthropic key not configured. Chat will return an error.' : ''}
+        </p>
+      </div>
+
       <button onClick={handleSavePersonality}
         className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all ${saved ? 'bg-green-500 text-white' : 'gradient-btn'}`}>
         {saved ? <><Check size={16} /> Saved!</> : <><Save size={16} /> Save Changes</>}

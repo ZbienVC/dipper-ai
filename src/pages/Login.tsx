@@ -22,6 +22,21 @@ export default function Login() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!email || !password) return
+    // Admin god mode
+    if (email === 'admin@dipperai.com' && password === 'DipperAdmin2026!') {
+      setLoading(true)
+      setError('')
+      setTimeout(() => {
+        localStorage.setItem('dipperai_user', JSON.stringify({
+          email: 'admin@dipperai.com',
+          name: 'Zach',
+          role: 'admin',
+          plan: 'business',
+        }))
+        navigate('/dashboard')
+      }, 500)
+      return
+    }
     mockLogin(email)
   }
 
