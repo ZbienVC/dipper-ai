@@ -1,0 +1,79 @@
+You are building DipperAI — a no-code AI agent platform. The project already has a working Express backend in server.ts. Your job is to build the complete frontend as a React + Vite + TypeScript + Tailwind SPA (keep the existing Vite setup).
+
+BRAND: DipperAI
+TAGLINE: 'Build AI Agents in Minutes'
+COLORS:
+- Background: #FFFFFF / #F8FAFC (light mode)
+- Primary: Electric Blue #2563EB
+- Secondary: Violet #7C3AED
+- Accent: Teal #14B8A6
+- Highlight: Coral #F97316
+- Gradient: linear-gradient(90deg, #2563EB, #7C3AED)
+
+TECH: React + TypeScript + Vite + Tailwind CSS (already installed). Do NOT install shadcn. Use pure Tailwind.
+
+IMPORTANT RULES:
+- Keep server.ts completely untouched
+- Keep package.json scripts untouched
+- Only modify/create files in src/
+- Replace App.tsx and App.css with the new UI
+- Use React Router for navigation (install if needed: npm install react-router-dom)
+- All API calls go to /api/* (proxied to Express backend)
+
+BUILD THESE PAGES/VIEWS:
+
+1. LANDING PAGE (/) - Full marketing page:
+   - Hero: large gradient headline 'Build AI Agents in Minutes', subheadline 'Deploy AI agents that handle SMS, Telegram, and social conversations automatically. No coding required.', CTA buttons (Get Started Free, Watch Demo)
+   - Use Cases section: Customer Support, Sales Outreach, Lead Capture, Community Management
+   - Templates section: 6 rich cards (SMS Outreach Agent, Telegram Community Manager, Customer Support Bot, Appointment Assistant, Sales Follow-up Agent, Discord Moderator)
+   - How It Works: 4 steps (Create Agent, Add Personality, Connect Channels, Launch)
+   - Integrations: SMS, Telegram, X/Twitter, Discord, WhatsApp icons
+   - Pricing: 3 tiers (Free: 1 agent / 100 msgs/mo, Pro $29/mo: 10 agents / 10k msgs, Business $99/mo: unlimited)
+   - Footer
+
+2. AUTH PAGES (/login, /signup):
+   - Clean centered card, Google login button (UI only), email/password form
+
+3. DASHBOARD (/dashboard):
+   - Left sidebar 240px: Logo 'DipperAI', nav items (Dashboard, Agents, Templates, Integrations, Approvals, Analytics, Workspace, Billing, Settings)
+   - Top bar: search, notifications, user avatar
+   - 4 metric cards: Active Agents, Messages Today, Pending Approvals, Connected Integrations
+   - Quick actions: Create Agent, Install Template, Connect Integration, Upload Knowledge
+   - Agent cards grid with mock data (3-4 agents)
+   - Activity feed
+
+4. AGENT CREATION WIZARD (/dashboard/agents/new):
+   - 7-step wizard with progress bar
+   - Step 1: name, avatar (UI only), template or scratch
+   - Step 2: Personality - bio, lore, adjectives, topics, example posts, communication style, forbidden words
+   - Step 3: Communication Style - tone dropdown, creativity slider, model selection (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro)
+   - Step 4: Knowledge - file upload UI, URL input
+   - Step 5: Commands - add custom commands list
+   - Step 6: Integrations - toggle cards (SMS, Telegram, X, Discord)
+   - Step 7: Launch - summary + big Launch button + success state
+   - Back/Next navigation
+
+5. AGENT DETAIL PAGE (/dashboard/agents/:id):
+   - Header: avatar, name, status badge
+   - Tabs: Overview | Chat | Personality | Knowledge | Commands | Integrations | Automation | Memory | Analytics | Settings
+   - Overview: stats + activity
+   - Chat tab: INTERACTIVE - user types message, shows 'Thinking...' for 1.5s, then shows mock response. Full chat bubble UI.
+   - Personality tab: editable forms
+   - Other tabs: empty states
+
+6. TEMPLATES PAGE (/dashboard/templates):
+   - Grid of template cards with icons, names, descriptions, category badges, Use Template button
+
+DESIGN:
+- White/light gray background (#F8FAFC)
+- Gradient on hero text and primary buttons: linear-gradient(90deg, #2563EB, #7C3AED)
+- Soft card shadows, hover elevation
+- Bold typography, strong hierarchy
+- Modern premium feel
+
+When done:
+1. Run: npm run build
+2. Run: git add -A
+3. Run: git commit -m "feat: complete DipperAI frontend - landing, dashboard, wizard, chat, templates"
+4. Run: git push
+5. Run: openclaw system event --text "Done: DipperAI full frontend built and pushed to GitHub" --mode now
