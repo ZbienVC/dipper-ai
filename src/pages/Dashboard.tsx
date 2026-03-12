@@ -1,6 +1,6 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
-import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Upload, Zap, Activity, Circle } from 'lucide-react'
+import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Upload, Zap, Activity, Circle, Edit3 } from 'lucide-react'
 
 const metrics = [
   { label: 'Active Agents', value: '3', change: '+1 this week', icon: Bot, color: 'text-blue-600', bg: 'bg-blue-50' },
@@ -31,6 +31,8 @@ const quickActions = [
 ]
 
 export default function Dashboard() {
+  const navigate = useNavigate()
+
   return (
     <DashboardLayout title="Dashboard">
       {/* Metrics */}
@@ -78,17 +80,20 @@ export default function Dashboard() {
           <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-bold text-gray-900">Your Agents</h2>
-              <Link to="/dashboard/agents/new" className="gradient-btn text-sm font-semibold px-4 py-2 rounded-lg flex items-center gap-1.5">
+              <button
+                onClick={() => navigate('/dashboard/agents/new')}
+                className="gradient-btn text-sm font-semibold px-4 py-2 rounded-lg flex items-center gap-1.5"
+              >
                 <Plus size={15} />
                 New Agent
-              </Link>
+              </button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {mockAgents.map(agent => (
-                <Link
+                <div
                   key={agent.id}
-                  to={`/dashboard/agents/${agent.id}`}
-                  className="group border border-gray-100 rounded-2xl p-5 hover:border-blue-200 hover:shadow-md transition-all"
+                  className="group border border-gray-100 rounded-2xl p-5 hover:border-blue-200 hover:shadow-md transition-all cursor-pointer"
+                  onClick={() => navigate(`/dashboard/agents/${agent.id}`)}
                 >
                   <div className="flex items-start gap-3 mb-3">
                     <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center text-2xl flex-shrink-0">
@@ -107,7 +112,7 @@ export default function Dashboard() {
                       {agent.status}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between mb-3">
                     <div className="flex gap-1.5">
                       {agent.channels.map(c => (
                         <span key={c} className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">{c}</span>
@@ -118,16 +123,34 @@ export default function Dashboard() {
                       <span>{agent.messages}</span>
                     </div>
                   </div>
-                </Link>
+                  {/* Action buttons */}
+                  <div className="flex gap-2" onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => navigate(`/dashboard/agents/${agent.id}?tab=chat`)}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold gradient-btn transition-all"
+                    >
+                      <MessageSquare size={13} /> Chat
+                    </button>
+                    <button
+                      onClick={() => navigate(`/dashboard/agents/${agent.id}?tab=personality`)}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all"
+                    >
+                      <Edit3 size={13} /> Edit
+                    </button>
+                  </div>
+                </div>
               ))}
 
               {/* Empty slot */}
-              <Link to="/dashboard/agents/new" className="border-2 border-dashed border-gray-200 rounded-2xl p-5 flex flex-col items-center justify-center gap-2 hover:border-blue-300 hover:bg-blue-50/30 transition-all group">
+              <button
+                onClick={() => navigate('/dashboard/agents/new')}
+                className="border-2 border-dashed border-gray-200 rounded-2xl p-5 flex flex-col items-center justify-center gap-2 hover:border-blue-300 hover:bg-blue-50/30 transition-all group"
+              >
                 <div className="w-10 h-10 rounded-full bg-gray-100 group-hover:bg-blue-100 flex items-center justify-center transition-colors">
                   <Plus size={20} className="text-gray-400 group-hover:text-blue-500" />
                 </div>
                 <span className="text-sm font-medium text-gray-400 group-hover:text-blue-500 transition-colors">Create New Agent</span>
-              </Link>
+              </button>
             </div>
           </div>
         </div>
