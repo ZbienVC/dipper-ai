@@ -97,7 +97,7 @@ export default function NewAgent() {
 
       const systemPrompt = state.systemPrompt || state.bio
         ? `${state.systemPrompt || ''}\n\nYou are ${state.name}. ${state.bio}\n\nPersonality: ${state.adjectives.join(', ')}\nTopics: ${state.topics.join(', ')}\nTone: ${state.tone}\nCommunication style: ${state.commStyle}${state.forbiddenWords ? `\nNever use: ${state.forbiddenWords}` : ''}`
-        : `You are ${state.name}, an AI assistant. Be ${state.tone.toLowerCase()} and ${state.commStyle.toLowerCase()}.`
+        : `You are \, an AI assistant. Be ${state.tone.toLowerCase()} and ${state.commStyle.toLowerCase()}.`
 
       if (!token) {
         // not logged in — still show launched screen, just no agent saved
@@ -109,7 +109,7 @@ export default function NewAgent() {
       const res = await fetch('/api/agents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: state.name, description: state.bio, systemPrompt, model: state.model, provider: state.provider }),
+        body: JSON.stringify({ name: state.name || 'My Agent', description: state.bio, systemPrompt, model: state.model, provider: state.provider }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -408,11 +408,14 @@ export default function NewAgent() {
             </div>
           ))}
         </div>
-        <button onClick={handleLaunch} disabled={!state.name || saving}
-          className="w-full gradient-btn py-4 rounded-xl font-bold text-base flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+        <button onClick={handleLaunch} disabled={saving}
+          className="w-full gradient-btn py-4 rounded-xl font-bold text-base flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           {saving ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Rocket size={20} />}
           {saving ? 'Launching...' : 'Launch Agent'}
         </button>
+        {!state.name && (
+          <p className="text-amber-400 text-xs text-center mt-2">⚠ No name set — go back to Step 1 to name your agent, or it will launch as "My Agent"</p>
+        )}
       </div>
     )
   }
@@ -480,5 +483,6 @@ export default function NewAgent() {
     </DashboardLayout>
   )
 }
+
 
 
