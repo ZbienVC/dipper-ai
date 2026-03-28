@@ -139,6 +139,9 @@ function decodeCredentials(creds: Record<string, string>): Record<string, string
 // ─── Express ──────────────────────────────────────────────────────────────────
 let db: Low<DBSchema>;
 const save = () => { try { db.write(); } catch { /* in-memory mode */ } };
+const findUser = (id: string) => db.data.users.find(u => u.id === id);
+const findUserByEmail = (email: string) => db.data.users.find(u => u.email === email.toLowerCase());
+const findAgent = (id: string, userId?: string) => db.data.agents.find(a => a.id === id && a.is_active && (userId ? a.user_id === userId : true));
 
 async function startServer() {
   // Initialize DB
@@ -563,6 +566,7 @@ async function startServer() {
 }
 
 startServer().catch(console.error);
+
 
 
 
