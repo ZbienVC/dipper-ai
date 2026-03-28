@@ -35,16 +35,11 @@ type Conversation = { id: string; agent_id: string; user_id?: string; channel: s
 
 type DBSchema = { users: User[]; agents: Agent[]; conversations: Conversation[]; messages: Message[]; };
 
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, 'dipperai.json');
+const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'dipperai.json');
 const adapter = new JSONFileSync<DBSchema>(dbPath);
 const db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [] });
-db.read();
-
-// Helpers
-const findUser = (id: string) => db.data.users.find(u => u.id === id);
-const findUserByEmail = (email: string) => db.data.users.find(u => u.email === email.toLowerCase());
-const findAgent = (id: string, userId?: string) => db.data.agents.find(a => a.id === id && a.is_active && (userId ? a.user_id === userId : true));
-const save = () => db.write();
+try { db.read(); } catch { /* fresh db */ }
+const save = () => { try { db.write(); } catch { /* ignore write errors */ } };
 
 // ─── Plan Limits ─────────────────────────────────────────────────────────────
 const PLAN_LIMITS: Record<string, { agents: number; messagesPerDay: number }> = {
@@ -279,7 +274,11 @@ async function startServer() {
     res.json({ agents: agents.map(a => ({ id: a.id, name: a.name, emoji: a.emoji, total_messages: a.total_messages })), totalMessages });
   });
 
-  // Serve frontend
+  // Healthcheck
+  app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+  app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+
+    // Serve frontend
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
@@ -293,3 +292,4 @@ async function startServer() {
 }
 
 startServer().catch(console.error);
+
