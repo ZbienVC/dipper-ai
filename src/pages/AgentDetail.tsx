@@ -4,12 +4,14 @@ import DashboardLayout from '../components/DashboardLayout'
 import {
   MessageSquare, BarChart2, Settings, BookOpen, Terminal,
   Plug, User, Activity, Edit3, Save, Circle, Send, Bot,
-  Upload, Link2, FileText, Plus, X, Check, Loader2, Globe, Copy, ExternalLink, ToggleLeft, ToggleRight
+  Upload, Link2, FileText, Plus, X, Check, Loader2, Globe, Copy, ExternalLink, ToggleLeft, ToggleRight,
+  Users, Trash2, ChevronRight
 } from 'lucide-react'
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Activity },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'users', label: 'Users', icon: Users },
   { id: 'personality', label: 'Personality', icon: User },
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
   { id: 'commands', label: 'Commands', icon: Terminal },
@@ -81,6 +83,16 @@ export default function AgentDetail() {
   const [embedToggling, setEmbedToggling] = useState(false)
   const [copiedKey, setCopiedKey] = useState('')
 
+  // Memory/users state
+  const [memories, setMemories] = useState<any[]>([])
+  const [memoriesTotal, setMemoriesTotal] = useState(0)
+  const [memoriesLoading, setMemoriesLoading] = useState(false)
+  const [selectedMemory, setSelectedMemory] = useState<any>(null)
+  const [memoryDetail, setMemoryDetail] = useState<any>(null)
+  const [memoryDetailLoading, setMemoryDetailLoading] = useState(false)
+  const [clearAllConfirm, setClearAllConfirm] = useState(false)
+  const [deleteMemConfirm, setDeleteMemConfirm] = useState<string | null>(null)
+
   useEffect(() => {
     const token = getToken()
     if (!token) return
@@ -113,6 +125,20 @@ export default function AgentDetail() {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, thinking])
   useEffect(() => { const tab = searchParams.get('tab'); if (tab) setActiveTab(tab) }, [searchParams])
+
+  // Load memories when users tab is activated
+  useEffect(() => {
+    if (activeTab === 'users' && agent) {
+      const token = getToken()
+      if (!token) return
+      setMemoriesLoading(true)
+      fetch(`/api/agents/${agent.id}/memories?limit=50&offset=0`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : { memories: [], total: 0 })
+        .then((d: any) => { setMemories(d.memories || []); setMemoriesTotal(d.total || 0) })
+        .catch(() => {})
+        .finally(() => setMemoriesLoading(false))
+    }
+  }, [activeTab, agent?.id])
 
   const sendMessage = async () => {
     if (!inputText.trim() || thinking || !agent) return
@@ -212,6 +238,13 @@ export default function AgentDetail() {
   )
 
   const renderChat = () => (
+    <div className="space-y-3">
+      {memoriesTotal > 0 && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-violet-500/10 border border-violet-500/20 rounded-xl text-sm text-violet-300">
+          <span>💾</span>
+          <span>Memory active — this agent remembers past interactions</span>
+        </div>
+      )}
     <div className="flex flex-col h-[580px] bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
       <div className="px-4 py-3 border-b border-[#1e1e2e] flex items-center gap-3">
         <div className="w-8 h-8 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-sm">
@@ -298,6 +331,7 @@ export default function AgentDetail() {
           </p>
         )}
       </div>
+    </div>
     </div>
   )
 
@@ -618,6 +652,222 @@ export default function AgentDetail() {
     )
   }
 
+  // ─── Memory/Users helpers ──────────────────────────────────────────────────
+  const maskIdentifier = (id: string) => {
+    if (!id || id.length <= 3) return '***'
+    return id.slice(0, 3) + '***'
+  }
+
+  const channelBadgeClass = (ch: string) => {
+    if (ch === 'telegram') return 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+    if (ch === 'sms') return 'bg-green-500/10 text-green-400 border-green-500/20'
+    return 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+  }
+
+  const relativeTime = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    const days = Math.floor(hrs / 24)
+    return `${days}d ago`
+  }
+
+  const loadMemoryDetail = (memId: string) => {
+    const token = getToken()
+    if (!token || !agent) return
+    setMemoryDetailLoading(true)
+    setSelectedMemory(memId)
+    fetch(`/api/agents/${agent.id}/memories/${memId}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setMemoryDetail(d))
+      .catch(() => {})
+      .finally(() => setMemoryDetailLoading(false))
+  }
+
+  const deleteMemory = (memId: string) => {
+    const token = getToken()
+    if (!token || !agent) return
+    fetch(`/api/agents/${agent.id}/memories/${memId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+      .then(() => {
+        setMemories(prev => prev.filter(m => m.id !== memId))
+        setMemoriesTotal(prev => prev - 1)
+        setSelectedMemory(null)
+        setMemoryDetail(null)
+        setDeleteMemConfirm(null)
+      })
+      .catch(() => {})
+  }
+
+  const clearAllMemories = () => {
+    const token = getToken()
+    if (!token || !agent) return
+    fetch(`/api/agents/${agent.id}/memories`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+      .then(() => {
+        setMemories([])
+        setMemoriesTotal(0)
+        setSelectedMemory(null)
+        setMemoryDetail(null)
+        setClearAllConfirm(false)
+      })
+      .catch(() => {})
+  }
+
+  const renderUsers = () => (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-bold text-white">User Memory</h2>
+          <p className="text-xs text-slate-500 mt-0.5">{memoriesTotal} user{memoriesTotal !== 1 ? 's' : ''} remembered</p>
+        </div>
+        {memoriesTotal > 0 && (
+          <button onClick={() => setClearAllConfirm(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 text-xs font-semibold transition-all">
+            <Trash2 size={12} /> Clear All
+          </button>
+        )}
+      </div>
+
+      {clearAllConfirm && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center justify-between gap-4">
+          <p className="text-sm text-red-300">Delete ALL user memories for this agent? This cannot be undone.</p>
+          <div className="flex gap-2 flex-shrink-0">
+            <button onClick={() => setClearAllConfirm(false)} className="px-3 py-1.5 rounded-lg border border-[#1e1e2e] text-slate-400 hover:bg-white/5 text-xs font-semibold">Cancel</button>
+            <button onClick={clearAllMemories} className="px-3 py-1.5 rounded-lg bg-red-500 text-white text-xs font-semibold hover:bg-red-600">Delete All</button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-4">
+        {/* User list */}
+        <div className={`bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden flex-1 min-w-0 ${selectedMemory ? 'hidden sm:block sm:max-w-sm' : 'w-full'}`}>
+          {memoriesLoading ? (
+            <div className="flex items-center justify-center py-16"><Loader2 size={22} className="animate-spin text-violet-400" /></div>
+          ) : memories.length === 0 ? (
+            <div className="p-12 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto mb-3">
+                <Users size={20} className="text-violet-400" />
+              </div>
+              <h3 className="font-semibold text-white text-sm mb-1">No users yet</h3>
+              <p className="text-xs text-slate-500">Start a conversation on any channel to build user memory.</p>
+            </div>
+          ) : (
+            <div>
+              {memories.map((mem) => (
+                <div key={mem.id} onClick={() => loadMemoryDetail(mem.id)}
+                  className={`flex items-center gap-3 px-4 py-3 border-b border-[#1e1e2e] cursor-pointer hover:bg-white/5 transition-all ${selectedMemory === mem.id ? 'bg-violet-500/10' : ''}`}>
+                  <div className="w-8 h-8 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0">
+                    <User size={14} className="text-violet-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-white truncate">{mem.name || maskIdentifier(mem.user_identifier)}</span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded border ${channelBadgeClass(mem.channel)} capitalize`}>{mem.channel}</span>
+                    </div>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      <span className="text-xs text-slate-500">{mem.message_count} msg{mem.message_count !== 1 ? 's' : ''}</span>
+                      <span className="text-xs text-slate-600">{relativeTime(mem.last_seen)}</span>
+                    </div>
+                  </div>
+                  <ChevronRight size={14} className="text-slate-600 flex-shrink-0" />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Detail panel */}
+        {selectedMemory && (
+          <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl flex-1 min-w-0">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e1e2e]">
+              <h3 className="font-semibold text-white text-sm">User Details</h3>
+              <button onClick={() => { setSelectedMemory(null); setMemoryDetail(null) }}
+                className="w-7 h-7 rounded-lg hover:bg-white/5 flex items-center justify-center text-slate-500 hover:text-white">
+                <X size={14} />
+              </button>
+            </div>
+            {memoryDetailLoading ? (
+              <div className="flex items-center justify-center py-16"><Loader2 size={22} className="animate-spin text-violet-400" /></div>
+            ) : memoryDetail ? (
+              <div className="p-4 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <p className="text-xs text-slate-500 mb-1">Identifier</p>
+                    <p className="text-sm font-semibold text-white">{maskIdentifier(memoryDetail.user_identifier)}</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <p className="text-xs text-slate-500 mb-1">Channel</p>
+                    <span className={`text-xs px-1.5 py-0.5 rounded border ${channelBadgeClass(memoryDetail.channel)} capitalize`}>{memoryDetail.channel}</span>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <p className="text-xs text-slate-500 mb-1">Messages</p>
+                    <p className="text-sm font-semibold text-white">{memoryDetail.message_count}</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <p className="text-xs text-slate-500 mb-1">Last seen</p>
+                    <p className="text-sm font-semibold text-white">{relativeTime(memoryDetail.last_seen)}</p>
+                  </div>
+                </div>
+
+                {/* Facts */}
+                <div className="bg-white/5 rounded-xl p-4 space-y-2">
+                  <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Extracted Facts</h4>
+                  {memoryDetail.facts?.name && (
+                    <div><span className="text-xs text-slate-500">Name: </span><span className="text-sm text-white">{memoryDetail.facts.name}</span></div>
+                  )}
+                  {memoryDetail.facts?.preferences?.length > 0 && (
+                    <div><span className="text-xs text-slate-500">Preferences: </span><span className="text-sm text-white">{memoryDetail.facts.preferences.join(', ')}</span></div>
+                  )}
+                  {memoryDetail.facts?.past_issues?.length > 0 && (
+                    <div><span className="text-xs text-slate-500">Past issues: </span><span className="text-sm text-white">{memoryDetail.facts.past_issues.join(', ')}</span></div>
+                  )}
+                  {Object.entries(memoryDetail.facts?.custom || {}).map(([k, v]) => (
+                    <div key={k}><span className="text-xs text-slate-500">{k}: </span><span className="text-sm text-white">{String(v)}</span></div>
+                  ))}
+                  {!memoryDetail.facts?.name && !memoryDetail.facts?.preferences?.length && !memoryDetail.facts?.past_issues?.length && Object.keys(memoryDetail.facts?.custom || {}).length === 0 && (
+                    <p className="text-xs text-slate-600">No facts extracted yet (needs 5+ messages).</p>
+                  )}
+                </div>
+
+                {/* Summary */}
+                {memoryDetail.summary && (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Summary</h4>
+                    <p className="text-sm text-slate-300 leading-relaxed">{memoryDetail.summary}</p>
+                  </div>
+                )}
+
+                {/* Dates */}
+                <div className="text-xs text-slate-600 space-y-1">
+                  <p>First seen: {new Date(memoryDetail.first_seen).toLocaleDateString()}</p>
+                  <p>Last seen: {new Date(memoryDetail.last_seen).toLocaleDateString()}</p>
+                </div>
+
+                {/* Delete */}
+                {deleteMemConfirm === memoryDetail.id ? (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex items-center justify-between gap-3">
+                    <p className="text-xs text-red-300">Delete this user's memory?</p>
+                    <div className="flex gap-2">
+                      <button onClick={() => setDeleteMemConfirm(null)} className="px-2 py-1 rounded border border-[#1e1e2e] text-slate-400 text-xs">Cancel</button>
+                      <button onClick={() => deleteMemory(memoryDetail.id)} className="px-2 py-1 rounded bg-red-500 text-white text-xs">Delete</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setDeleteMemConfirm(memoryDetail.id)}
+                    className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors">
+                    <Trash2 size={12} /> Delete memory
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
   const renderEmptyTab = (tab: string) => (
     <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-16 text-center">
       <div className="w-14 h-14 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto mb-4">
@@ -629,7 +879,7 @@ export default function AgentDetail() {
   )
 
   const tabContent: Record<string, () => JSX.Element> = {
-    overview: renderOverview, chat: renderChat, personality: renderPersonality, knowledge: renderKnowledge,
+    overview: renderOverview, chat: renderChat, users: renderUsers, personality: renderPersonality, knowledge: renderKnowledge,
     commands: renderCommands, integrations: renderAgentIntegrations,
     deploy: renderDeploy,
     analytics: () => renderEmptyTab('analytics'), settings: () => renderEmptyTab('settings'),

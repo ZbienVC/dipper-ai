@@ -62,11 +62,32 @@ type ActivityLog = {
   created_at: string;
 };
 
+type UserMemory = {
+  id: string;
+  agent_id: string;
+  user_identifier: string;
+  channel: string;
+  facts: {
+    name?: string;
+    preferences?: string[];
+    past_issues?: string[];
+    custom: Record<string, string>;
+  };
+  summary?: string;
+  summary_updated_at?: string;
+  message_count: number;
+  last_seen: string;
+  first_seen: string;
+  created_at: string;
+  updated_at: string;
+};
+
 type DBSchema = {
   users: User[]; agents: Agent[]; conversations: Conversation[];
   messages: Message[]; integrations: Integration[];
   scheduled_messages: ScheduledMessage[];
   activity_logs: ActivityLog[];
+  user_memories: UserMemory[];
 };
 
 // ─── Plan Definitions ─────────────────────────────────────────────────────────
@@ -231,6 +252,100 @@ function logActivity(params: Omit<ActivityLog, 'id' | 'created_at'>) {
   save();
 }
 
+// ─── Memory Helpers ───────────────────────────────────────────────────────────
+async function extractAndUpdateMemory(
+  agentId: string,
+  userIdentifier: string,
+  channel: string,
+  conversationHistory: { role: string; content: string }[],
+  _agentSystemPrompt: string
+): Promise<void> {
+  try {
+    if (!db?.data?.user_memories) db.data.user_memories = [];
+    const now = new Date().toISOString();
+    let mem = db.data.user_memories.find(m => m.agent_id === agentId && m.user_identifier === userIdentifier && m.channel === channel);
+    if (!mem) {
+      mem = {
+        id: randomUUID(), agent_id: agentId, user_identifier: userIdentifier, channel,
+        facts: { custom: {} },
+        message_count: 0, last_seen: now, first_seen: now,
+        created_at: now, updated_at: now,
+      };
+      db.data.user_memories.push(mem);
+    }
+    mem.message_count++;
+    mem.last_seen = now;
+    mem.updated_at = now;
+
+    // Every 5 messages, extract facts
+    if (mem.message_count % 5 === 0 && conversationHistory.length > 0) {
+      try {
+        const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const convoText = conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n');
+        const extractResp = await client.messages.create({
+          model: 'claude-haiku-4-5', max_tokens: 512,
+          system: 'You are a fact extractor. Return ONLY valid JSON, no extra text.',
+          messages: [{
+            role: 'user',
+            content: `Extract key facts from this conversation. Return JSON exactly like: {"name": "string or null", "preferences": ["..."], "past_issues": ["..."], "custom_facts": {"key": "value"}}. Be concise.\n\nConversation:\n${convoText.slice(0, 3000)}`,
+          }],
+        });
+        const raw = (extractResp.content[0] as any).text as string;
+        const parsed = JSON.parse(raw.trim());
+        if (parsed.name && !mem.facts.name) mem.facts.name = parsed.name;
+        if (Array.isArray(parsed.preferences)) {
+          mem.facts.preferences = [...new Set([...(mem.facts.preferences || []), ...parsed.preferences])];
+        }
+        if (Array.isArray(parsed.past_issues)) {
+          mem.facts.past_issues = [...new Set([...(mem.facts.past_issues || []), ...parsed.past_issues])];
+        }
+        if (parsed.custom_facts && typeof parsed.custom_facts === 'object') {
+          mem.facts.custom = { ...mem.facts.custom, ...parsed.custom_facts };
+        }
+      } catch { /* fail silently */ }
+    }
+
+    // Every 20 messages, generate rolling summary
+    if (mem.message_count % 20 === 0 && conversationHistory.length > 0) {
+      try {
+        const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const convoText = conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n');
+        const sumResp = await client.messages.create({
+          model: 'claude-haiku-4-5', max_tokens: 256,
+          system: 'Summarize the conversation in 2-3 sentences for future context. Be concise and factual.',
+          messages: [{ role: 'user', content: convoText.slice(0, 4000) }],
+        });
+        mem.summary = (sumResp.content[0] as any).text as string;
+        mem.summary_updated_at = new Date().toISOString();
+      } catch { /* fail silently */ }
+    }
+
+    mem.updated_at = new Date().toISOString();
+    save();
+  } catch { /* fail silently — never block chat */ }
+}
+
+function buildMemoryContext(agentId: string, userIdentifier: string, channel: string): string {
+  if (!db?.data?.user_memories) return '';
+  const mem = db.data.user_memories.find(m => m.agent_id === agentId && m.user_identifier === userIdentifier && m.channel === channel);
+  if (!mem) return '';
+  const lines: string[] = ['=== User Memory ==='];
+  if (mem.facts.name) lines.push(`Name: ${mem.facts.name}`);
+  if (mem.facts.preferences?.length) lines.push(`Preferences: ${mem.facts.preferences.join(', ')}`);
+  if (mem.facts.past_issues?.length) lines.push(`Past issues: ${mem.facts.past_issues.join(', ')}`);
+  if (Object.keys(mem.facts.custom).length) {
+    for (const [k, v] of Object.entries(mem.facts.custom)) lines.push(`${k}: ${v}`);
+  }
+  if (mem.summary) lines.push(`Summary: ${mem.summary}`);
+  const lastSeen = new Date(mem.last_seen);
+  const diffMs = Date.now() - lastSeen.getTime();
+  const diffDays = Math.floor(diffMs / 86400000);
+  const lastSeenStr = diffDays === 0 ? 'today' : diffDays === 1 ? 'yesterday' : `${diffDays} days ago`;
+  lines.push(`Last seen: ${lastSeenStr}`);
+  lines.push('=== End Memory ===');
+  return lines.join('\n');
+}
+
 // ─── In-memory cron runner ────────────────────────────────────────────────────
 function parseCronMinute(expr: string): boolean {
   try {
@@ -288,16 +403,17 @@ async function startServer() {
   try {
     const { JSONFileSync } = await import('lowdb/node');
     const adapter = new JSONFileSync<DBSchema>(dbPath);
-    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [] });
+    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [] });
     try { db.read(); } catch { /* fresh */ }
     if (!db.data.scheduled_messages) db.data.scheduled_messages = [];
     if (!db.data.activity_logs) db.data.activity_logs = [];
+    if (!db.data.user_memories) db.data.user_memories = [];
     db.write();
     console.log('[DipperAI] File DB:', dbPath);
   } catch {
     console.warn('[DipperAI] Read-only filesystem, using in-memory DB');
     const { MemorySync } = await import('lowdb');
-    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [] });
+    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [] });
   }
 
   startCronRunner();
@@ -468,7 +584,9 @@ async function startServer() {
     const plan = PLANS[req.user.plan] || PLANS.free;
     const startTime = Date.now();
     try {
-      const { text: content, tokensUsed } = await callAI(activeProvider, effectiveModel, agent.system_prompt, history, plan.maxTokens);
+      const memoryContext = buildMemoryContext(agent.id, req.userId, 'web');
+      const systemPromptWithMemory = memoryContext ? `${memoryContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const { text: content, tokensUsed } = await callAI(activeProvider, effectiveModel, systemPromptWithMemory, history, plan.maxTokens);
       const latency_ms = Date.now() - startTime;
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: effectiveModel, created_at: new Date().toISOString() });
@@ -478,6 +596,8 @@ async function startServer() {
       req.user.tokens_used_today = (req.user.tokens_used_today || 0) + tokensUsed;
       console.log(`[chat] model=${effectiveModel} tokens=${tokensUsed}`);
       save();
+      // Async memory extraction — never block response
+      extractAndUpdateMemory(agent.id, req.userId, 'web', [...history, { role: 'assistant', content }], agent.system_prompt).catch(() => {});
       logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'web', summary: 'Replied to web chat message', details: content.slice(0, 200), model_used: effectiveModel, tokens_used: tokensUsed, latency_ms, status: 'success' });
       res.json({ content, conversationId: convId, model_used: effectiveModel });
     } catch (e: any) {
@@ -888,8 +1008,12 @@ async function startServer() {
       const effectiveModel = agentOwner ? getEffectiveModel(agentOwner, agent.model) : agent.model;
       const provider = effectiveModel.startsWith('gpt') ? 'openai' : effectiveModel.startsWith('gemini') ? 'google' : 'anthropic';
 
+      const telegramUserId = String(msg.from?.id || chatId);
+      const memoryContext = buildMemoryContext(agent.id, telegramUserId, 'telegram');
+      const systemPromptWithMemory = memoryContext ? `${memoryContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+
       const history = [{ role: 'user', content: text }];
-      const { text: reply } = await callAI(provider, effectiveModel, agent.system_prompt, history);
+      const { text: reply } = await callAI(provider, effectiveModel, systemPromptWithMemory, history);
 
       // Handle delay if configured
       if (agent.response_delay_ms && agent.response_delay_ms > 0) {
@@ -899,6 +1023,8 @@ async function startServer() {
       await sendTelegramMessage(botToken, chatId, reply);
       agent.total_messages++;
       save();
+      // Async memory extraction
+      extractAndUpdateMemory(agent.id, telegramUserId, 'telegram', [...history, { role: 'assistant', content: reply }], agent.system_prompt).catch(() => {});
       logActivity({ user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'telegram', summary: 'Replied to Telegram message', details: reply.slice(0, 200), model_used: effectiveModel, status: 'success' });
     } catch (e) { console.error('[telegram webhook error]', e); }
   });
@@ -924,7 +1050,9 @@ async function startServer() {
       if (!agent) return;
 
       const history = [{ role: 'user', content: Body }];
-      const { text: reply } = await callAI(agent.provider, agent.model, agent.system_prompt, history);
+      const smsMemoryContext = buildMemoryContext(agent.id, From, 'sms');
+      const smsSystemPrompt = smsMemoryContext ? `${smsMemoryContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const { text: reply } = await callAI(agent.provider, agent.model, smsSystemPrompt, history);
 
       const { accountSid, authToken, phoneNumber } = decodeCredentials(matchedIntg.credentials);
       await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
@@ -937,6 +1065,7 @@ async function startServer() {
       });
       agent.total_messages++;
       save();
+      extractAndUpdateMemory(agent.id, From, 'sms', [...history, { role: 'assistant', content: reply }], agent.system_prompt).catch(() => {});
       logActivity({ user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'sms', summary: 'Replied to SMS message', details: reply.slice(0, 200), model_used: agent.model, status: 'success' });
     } catch (e) { console.error('[sms inbound error]', e); }
   });
@@ -980,6 +1109,52 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // ─── Memory API ───────────────────────────────────────────────────────────
+  app.get('/api/agents/:id/memories', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
+    const memories = (db.data.user_memories || []).filter(m => m.agent_id === agent.id);
+    const total = memories.length;
+    const paged = memories.slice(offset, offset + limit).map(m => ({
+      id: m.id,
+      user_identifier: m.user_identifier,
+      channel: m.channel,
+      name: m.facts.name,
+      message_count: m.message_count,
+      last_seen: m.last_seen,
+      first_seen: m.first_seen,
+    }));
+    res.json({ memories: paged, total });
+  });
+
+  app.get('/api/agents/:id/memories/:userId', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const mem = (db.data.user_memories || []).find(m => m.agent_id === agent.id && m.id === req.params.userId);
+    if (!mem) return res.status(404).json({ error: 'Memory not found' });
+    res.json(mem);
+  });
+
+  app.delete('/api/agents/:id/memories/:userId', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    if (!db.data.user_memories) db.data.user_memories = [];
+    db.data.user_memories = db.data.user_memories.filter(m => !(m.agent_id === agent.id && m.id === req.params.userId));
+    save();
+    res.json({ success: true });
+  });
+
+  app.delete('/api/agents/:id/memories', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    if (!db.data.user_memories) db.data.user_memories = [];
+    db.data.user_memories = db.data.user_memories.filter(m => m.agent_id !== agent.id);
+    save();
+    res.json({ success: true });
+  });
+
   // ─── Embed Public Endpoints ───────────────────────────────────────────────
 
   // GET /api/embed/:token/info — public, no auth
@@ -1008,12 +1183,16 @@ async function startServer() {
 
     const startTime = Date.now();
     try {
-      const { text: content, tokensUsed } = await callAI(agent.provider, agent.model, agent.system_prompt, history, 1024);
+      const embedUserId = `embed_${conversationId || convId}`;
+      const embedMemoryContext = buildMemoryContext(agent.id, embedUserId, 'web');
+      const embedSystemPrompt = embedMemoryContext ? `${embedMemoryContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const { text: content, tokensUsed } = await callAI(agent.provider, agent.model, embedSystemPrompt, history, 1024);
       const latency_ms = Date.now() - startTime;
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: agent.model, created_at: new Date().toISOString() });
       agent.total_messages++;
       save();
+      extractAndUpdateMemory(agent.id, embedUserId, 'web', [...history, { role: 'assistant', content }], agent.system_prompt).catch(() => {});
       logActivity({ user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'web', summary: 'Replied via web embed widget', details: content.slice(0, 200), model_used: agent.model, tokens_used: tokensUsed, latency_ms, status: 'success' });
       res.json({ content, conversationId: convId });
     } catch (e: any) {
