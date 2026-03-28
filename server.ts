@@ -980,6 +980,63 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // ─── Embed Public Endpoints ───────────────────────────────────────────────
+
+  // GET /api/embed/:token/info — public, no auth
+  app.get('/api/embed/:token/info', (req, res) => {
+    const agent = db.data.agents.find(a => a.embed_token === req.params.token && a.deployed_embed_enabled && a.is_active);
+    if (!agent) return res.status(404).json({ error: 'Widget not found or disabled' });
+    res.json({ name: agent.name, description: agent.description, emoji: agent.emoji });
+  });
+
+  // POST /api/embed/:token/chat — public, no auth
+  app.post('/api/embed/:token/chat', async (req, res) => {
+    const agent = db.data.agents.find(a => a.embed_token === req.params.token && a.deployed_embed_enabled && a.is_active);
+    if (!agent) return res.status(404).json({ error: 'Widget not found or disabled' });
+
+    const { message, conversationId } = req.body;
+    if (!message) return res.status(400).json({ error: 'Message required' });
+
+    let convId = conversationId;
+    if (!convId) {
+      convId = randomUUID();
+      db.data.conversations.push({ id: convId, agent_id: agent.id, user_id: undefined, channel: 'web', message_count: 0, created_at: new Date().toISOString() });
+    }
+
+    const history = db.data.messages.filter(m => m.conversation_id === convId).map(m => ({ role: m.role, content: m.content }));
+    history.push({ role: 'user', content: message });
+
+    const startTime = Date.now();
+    try {
+      const { text: content, tokensUsed } = await callAI(agent.provider, agent.model, agent.system_prompt, history, 1024);
+      const latency_ms = Date.now() - startTime;
+      db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
+      db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: agent.model, created_at: new Date().toISOString() });
+      agent.total_messages++;
+      save();
+      logActivity({ user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'web', summary: 'Replied via web embed widget', details: content.slice(0, 200), model_used: agent.model, tokens_used: tokensUsed, latency_ms, status: 'success' });
+      res.json({ content, conversationId: convId });
+    } catch (e: any) {
+      logActivity({ user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name, event_type: 'error', channel: 'web', summary: 'Embed chat error', status: 'error', error_message: e?.message });
+      res.status(500).json({ error: e?.message || 'AI call failed' });
+    }
+  });
+
+  // PATCH /api/agents/:id/embed — auth required — toggle embed on/off
+  app.patch('/api/agents/:id/embed', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { deployed_embed_enabled } = req.body;
+    if (typeof deployed_embed_enabled === 'boolean') {
+      agent.deployed_embed_enabled = deployed_embed_enabled;
+    } else {
+      agent.deployed_embed_enabled = !agent.deployed_embed_enabled;
+    }
+    agent.updated_at = new Date().toISOString();
+    save();
+    res.json(agent);
+  });
+
   // ─── Frontend ─────────────────────────────────────────────────────────────
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');

@@ -15,6 +15,7 @@ import ActivityPage from './pages/Activity'
 import Settings from './pages/Settings'
 import Billing from './pages/Billing'
 import Admin from './pages/Admin'
+import EmbedChat from './pages/EmbedChat'
 
 function PrivateRoute({ children }: { children: ReactNode }) {
   try {
@@ -50,6 +51,9 @@ function App() {
         <Route path="/dashboard/billing" element={<PrivateRoute><Billing /></PrivateRoute>} />
 
         <Route path="/admin" element={<Admin />} />
+
+        {/* Public embed chat — no auth required */}
+        <Route path="/embed/:token" element={<EmbedChat />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

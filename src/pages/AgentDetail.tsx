@@ -4,7 +4,7 @@ import DashboardLayout from '../components/DashboardLayout'
 import {
   MessageSquare, BarChart2, Settings, BookOpen, Terminal,
   Plug, User, Activity, Edit3, Save, Circle, Send, Bot,
-  Upload, Link2, FileText, Plus, X, Check, Loader2
+  Upload, Link2, FileText, Plus, X, Check, Loader2, Globe, Copy, ExternalLink, ToggleLeft, ToggleRight
 } from 'lucide-react'
 
 const TABS = [
@@ -14,6 +14,7 @@ const TABS = [
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
   { id: 'commands', label: 'Commands', icon: Terminal },
   { id: 'integrations', label: 'Integrations', icon: Plug },
+  { id: 'deploy', label: 'Deploy', icon: Globe },
   { id: 'analytics', label: 'Analytics', icon: BarChart2 },
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
@@ -76,6 +77,9 @@ export default function AgentDetail() {
   const [newDescription, setNewDescription] = useState('')
   const [integrationRecords, setIntegrationRecords] = useState<{ type: string; connected: boolean; bot_info?: string; agent_id?: string }[]>([])
   const [usageStats, setUsageStats] = useState<{ messagesUsedToday: number; messagesLimitToday: number; allowedModels: string[] } | null>(null)
+  const [embedEnabled, setEmbedEnabled] = useState(false)
+  const [embedToggling, setEmbedToggling] = useState(false)
+  const [copiedKey, setCopiedKey] = useState('')
 
   useEffect(() => {
     const token = getToken()
@@ -103,6 +107,7 @@ export default function AgentDetail() {
       setSelectedModel(agent.model || 'claude-haiku-4-5')
       setEditTopics(agent.description || '')
       setMessages([{ role: 'agent', text: `Hey! I'm ${agent.name}. How can I help you today?`, ts: getTime() }])
+      setEmbedEnabled(!!agent.deployed_embed_enabled)
     }
   }, [agent?.id])
 
@@ -482,6 +487,137 @@ export default function AgentDetail() {
     )
   }
 
+  const copySnippet = (text: string, key: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedKey(key)
+      setTimeout(() => setCopiedKey(''), 2000)
+    }).catch(() => {})
+  }
+
+  const toggleEmbed = async () => {
+    const token = getToken()
+    if (!token || !agent) return
+    setEmbedToggling(true)
+    try {
+      const res = await fetch(`/api/agents/${id}/embed`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ deployed_embed_enabled: !embedEnabled }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setEmbedEnabled(!!updated.deployed_embed_enabled)
+        setAgent(updated)
+      }
+    } catch {}
+    setEmbedToggling(false)
+  }
+
+  const renderDeploy = () => {
+    const origin = window.location.origin
+    const embedToken = agent?.embed_token || ''
+    const scriptSnippet = `<script src="${origin}/embed.js" data-token="${embedToken}"><\/script>`
+    const iframeSnippet = `<iframe src="${origin}/embed/${embedToken}" width="400" height="600" frameborder="0"><\/iframe>`
+    const previewUrl = `/embed/${embedToken}`
+
+    return (
+      <div className="space-y-4">
+        {/* Website Chat Widget */}
+        <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-2">
+              <Globe size={16} className="text-violet-400" />
+              <h3 className="font-semibold text-white text-sm">Website Chat Widget</h3>
+            </div>
+            <button
+              onClick={toggleEmbed}
+              disabled={embedToggling}
+              className="flex items-center gap-2 text-sm transition-colors"
+            >
+              {embedToggling ? (
+                <Loader2 size={18} className="animate-spin text-violet-400" />
+              ) : embedEnabled ? (
+                <ToggleRight size={22} className="text-violet-400" />
+              ) : (
+                <ToggleLeft size={22} className="text-slate-500" />
+              )}
+              <span className={embedEnabled ? 'text-violet-400 font-medium' : 'text-slate-500'}>
+                {embedEnabled ? 'Enabled' : 'Disabled'}
+              </span>
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">
+            Embed a floating chat widget on any website. Toggle to enable/disable public access.
+          </p>
+
+          {!embedEnabled && (
+            <div className="text-center py-6 text-slate-600 text-sm">
+              Enable the widget above to see embed snippets and preview.
+            </div>
+          )}
+
+          {embedEnabled && (
+            <div className="space-y-4">
+              {/* Script snippet */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">Floating Button (recommended)</p>
+                  <button
+                    onClick={() => copySnippet(scriptSnippet, 'script')}
+                    className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors"
+                  >
+                    {copiedKey === 'script' ? <><Check size={11} /> Copied!</> : <><Copy size={11} /> Copy</>}
+                  </button>
+                </div>
+                <pre className="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3 text-xs text-slate-300 overflow-x-auto whitespace-pre-wrap break-all font-mono">
+                  {scriptSnippet}
+                </pre>
+              </div>
+
+              {/* iFrame snippet */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">Inline iFrame (alternative)</p>
+                  <button
+                    onClick={() => copySnippet(iframeSnippet, 'iframe')}
+                    className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors"
+                  >
+                    {copiedKey === 'iframe' ? <><Check size={11} /> Copied!</> : <><Copy size={11} /> Copy</>}
+                  </button>
+                </div>
+                <pre className="bg-[#0a0a0f] border border-[#1e1e2e] rounded-lg p-3 text-xs text-slate-300 overflow-x-auto whitespace-pre-wrap break-all font-mono">
+                  {iframeSnippet}
+                </pre>
+              </div>
+
+              {/* Preview link */}
+              <a
+                href={previewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors"
+              >
+                <ExternalLink size={12} /> Open preview in new tab
+              </a>
+
+              {/* Live preview */}
+              <div>
+                <p className="text-xs text-slate-400 font-medium uppercase tracking-wide mb-2">Live Preview</p>
+                <div className="rounded-xl overflow-hidden border border-[#1e1e2e]" style={{ height: '420px' }}>
+                  <iframe
+                    src={previewUrl}
+                    style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+                    title="Chat Widget Preview"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   const renderEmptyTab = (tab: string) => (
     <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-16 text-center">
       <div className="w-14 h-14 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto mb-4">
@@ -495,6 +631,7 @@ export default function AgentDetail() {
   const tabContent: Record<string, () => JSX.Element> = {
     overview: renderOverview, chat: renderChat, personality: renderPersonality, knowledge: renderKnowledge,
     commands: renderCommands, integrations: renderAgentIntegrations,
+    deploy: renderDeploy,
     analytics: () => renderEmptyTab('analytics'), settings: () => renderEmptyTab('settings'),
   }
 
