@@ -1,51 +1,67 @@
 import DashboardLayout from '../components/DashboardLayout'
+import { useState, useEffect } from 'react'
 import { Check, Zap, ShieldCheck } from 'lucide-react'
 
-function getUser() {
+function getStoredUser() {
   try {
     const raw = localStorage.getItem('dipperai_user')
-    if (raw) return JSON.parse(raw) as { email: string; name: string; role?: string; plan?: string }
+    if (raw) return JSON.parse(raw) as { email: string; name: string; role?: string; plan?: string; token?: string }
   } catch {}
-  return { email: '', name: 'User' }
+  return { email: '', name: 'User', token: undefined }
 }
 
-const PLANS = [
+const PLAN_DEFS = [
   {
+    key: 'free',
     name: 'Free',
     price: '$0',
     period: '/mo',
-    current: true,
-    features: ['1 AI Agent', '100 messages/mo', '1 team member', 'SMS & Telegram', 'Community support'],
+    features: ['1 AI Agent', '20 messages/day', '1 team member', 'SMS & Telegram', 'Community support'],
     cta: 'Current Plan',
   },
   {
+    key: 'pro',
     name: 'Pro',
     price: '$49',
     period: '/mo',
-    current: false,
     popular: true,
-    features: ['10 AI Agents', '10,000 messages/mo', '5 team members', 'All channels', 'Priority support', 'Analytics dashboard', 'Custom commands'],
+    features: ['5 AI Agents', '500 messages/day', '5 team members', 'All channels', 'Priority support', 'Analytics dashboard', 'Custom commands'],
     cta: 'Upgrade to Pro',
   },
   {
+    key: 'business',
     name: 'Business',
     price: '$149',
     period: '/mo',
-    current: false,
-    features: ['Unlimited agents', 'Unlimited messages', 'Unlimited team members', 'All channels', 'Dedicated support', 'Advanced analytics', 'White-label option', 'API access'],
+    features: ['25 AI Agents', '5,000 messages/day', 'Unlimited team members', 'All channels', 'Dedicated support', 'Advanced analytics', 'White-label option', 'API access'],
     cta: 'Upgrade to Business',
   },
 ]
 
-const usageData = [
-  { label: 'Agents', used: 1, limit: 1, color: 'bg-amber-500' },
-  { label: 'Messages', used: 47, limit: 100, color: 'bg-violet-500' },
-  { label: 'Team Members', used: 1, limit: 1, color: 'bg-amber-500' },
-]
-
 export default function Billing() {
-  const user = getUser()
-  const isAdmin = user.role === 'admin'
+  const storedUser = getStoredUser()
+  const [profile, setProfile] = useState<{ plan?: string; agentCount?: number; limits?: { agents: number; messagesPerDay: number }; role?: string } | null>(null)
+
+  useEffect(() => {
+    const token = storedUser.token
+    if (!token) return
+    fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setProfile(d))
+      .catch(() => {})
+  }, [])
+
+  const currentPlan = profile?.plan || storedUser.plan || 'free'
+  const isAdmin = profile?.role === 'admin' || storedUser.role === 'admin'
+  const agentCount = profile?.agentCount ?? 0
+  const limits = profile?.limits || { agents: 1, messagesPerDay: 20 }
+
+  const usageData = [
+    { label: 'Agents', used: agentCount, limit: limits.agents, color: 'bg-amber-500' },
+    { label: 'Messages/day', used: 0, limit: limits.messagesPerDay, color: 'bg-violet-500' },
+  ]
+
+  const PLANS = PLAN_DEFS.map(p => ({ ...p, current: p.key === currentPlan }))
 
   if (isAdmin) {
     return (
@@ -104,7 +120,7 @@ export default function Billing() {
               <Zap size={18} className="text-violet-400" />
             </div>
             <div>
-              <p className="font-bold text-white">Free Plan</p>
+              <p className="font-bold text-white capitalize">{currentPlan} Plan</p>
               <p className="text-xs text-slate-500">Current plan</p>
             </div>
           </div>

@@ -31,12 +31,6 @@ export default function Agents() {
       } catch { return null }
     })()
     if (!token) {
-      // Fallback mock data
-      setAgents([
-        { id: '1', name: 'Support Pro', status: 'active', messages: 412, template: 'Customer Support Bot', channels: ['SMS', 'Telegram'] },
-        { id: '2', name: 'The Closer', status: 'active', messages: 289, template: 'Sales Follow-up Agent', channels: ['SMS', 'X'] },
-        { id: '3', name: 'Community Bob', status: 'paused', messages: 146, template: 'Telegram Community Manager', channels: ['Telegram', 'Discord'] },
-      ])
       setLoading(false)
       return
     }

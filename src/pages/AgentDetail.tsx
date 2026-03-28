@@ -4,36 +4,8 @@ import DashboardLayout from '../components/DashboardLayout'
 import {
   MessageSquare, BarChart2, Settings, BookOpen, Terminal,
   Plug, User, Activity, Edit3, Save, Circle, Send, Bot,
-  Upload, Link2, FileText, Plus, X, Check
+  Upload, Link2, FileText, Plus, X, Check, Loader2
 } from 'lucide-react'
-
-const MOCK_AGENTS: Record<string, {
-  id: string, name: string, status: string, template: string, model: string,
-  messages: number, uptime: string, accuracy: string, channels: string[],
-  bio: string, tone: string, commStyle: string,
-}> = {
-  '1': {
-    id: '1', name: 'SupportBot Pro', status: 'active', template: 'Customer Support Bot',
-    model: 'Claude 3.5 Haiku', messages: 412, uptime: '99.8%', accuracy: '94%',
-    channels: ['SMS', 'Telegram'],
-    bio: 'I handle customer support inquiries with speed and precision.',
-    tone: 'Friendly', commStyle: 'Professional',
-  },
-  '2': {
-    id: '2', name: 'Sales Ninja', status: 'active', template: 'Sales Follow-up Agent',
-    model: 'GPT-4o', messages: 289, uptime: '99.5%', accuracy: '91%',
-    channels: ['SMS', 'X'],
-    bio: 'I turn cold leads warm and warm leads hot.',
-    tone: 'Assertive', commStyle: 'Casual & Friendly',
-  },
-  '3': {
-    id: '3', name: 'Community Max', status: 'paused', template: 'Telegram Community Manager',
-    model: 'Gemini 1.5 Pro', messages: 146, uptime: '97.2%', accuracy: '89%',
-    channels: ['Telegram', 'Discord'],
-    bio: 'I keep communities engaged, moderated, and growing.',
-    tone: 'Playful', commStyle: 'Casual & Friendly',
-  },
-}
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Activity },
@@ -53,33 +25,42 @@ function getTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+function getToken() {
+  try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
+}
+
 const inputClass = "w-full px-4 py-2.5 rounded-xl bg-white/5 border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white placeholder-slate-600 text-sm transition-all"
 
 export default function AgentDetail() {
-  const { id = '1' } = useParams<{ id: string }>()
+  const { id = '' } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
 
-  const [agentData, setAgentData] = useState<any>(null)
-  const agent = agentData || MOCK_AGENTS[id] || MOCK_AGENTS['1']
+  const [agent, setAgent] = useState<any>(null)
+  const [agentLoading, setAgentLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
 
   useEffect(() => {
-    const token = (() => { try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null } })()
-    if (!token) return
+    const token = getToken()
+    if (!token) { setNotFound(true); setAgentLoading(false); return }
     fetch(`/api/agents/${id}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
-      .then(d => d && setAgentData({ id: d.id, name: d.name, status: d.is_active ? 'active' : 'paused', template: d.description, model: d.model, messages: d.total_messages, uptime: 'N/A', accuracy: 'N/A', channels: [], bio: d.system_prompt, tone: 'Friendly', commStyle: 'Professional' }))
-      .catch(() => {})
+      .then(d => {
+        if (!d) { setNotFound(true); }
+        else setAgent(d)
+      })
+      .catch(() => setNotFound(true))
+      .finally(() => setAgentLoading(false))
   }, [id])
 
   const initialTab = searchParams.get('tab') || 'overview'
   const [activeTab, setActiveTab] = useState(initialTab)
   const [editBio, setEditBio] = useState('')
-  const [editTone, setEditTone] = useState('')
-  const [editCommStyle, setEditCommStyle] = useState('')
+  const [editTone, setEditTone] = useState('Friendly')
+  const [editCommStyle, setEditCommStyle] = useState('Professional')
   const [saved, setSaved] = useState(false)
   const [selectedModel, setSelectedModel] = useState('claude-haiku-4-5')
-  const [editAdjectives, setEditAdjectives] = useState('Helpful, Professional, Concise')
+  const [editAdjectives, setEditAdjectives] = useState('')
   const [editTopics, setEditTopics] = useState('')
   const [editForbiddenWords, setEditForbiddenWords] = useState('')
   const [messages, setMessages] = useState<ChatMsg[]>([])
@@ -88,17 +69,14 @@ export default function AgentDetail() {
   const chatEndRef = useRef<HTMLDivElement>(null)
   const [urlInput, setUrlInput] = useState('')
   const [knowledgeDragOver, setKnowledgeDragOver] = useState(false)
-  const [commands, setCommands] = useState<Command[]>([
-    { trigger: '/help', response: 'Lists all available features and commands.' },
-    { trigger: '/pricing', response: 'Shows current pricing plans.' },
-  ])
+  const [commands, setCommands] = useState<Command[]>([])
   const [showAddCommand, setShowAddCommand] = useState(false)
   const [newTrigger, setNewTrigger] = useState('')
   const [newResponse, setNewResponse] = useState('')
-  const [integrationRecords, setIntegrationRecords] = useState<{ type: string; connected: boolean; bot_info?: string }[]>([])
+  const [integrationRecords, setIntegrationRecords] = useState<{ type: string; connected: boolean; bot_info?: string; agent_id?: string }[]>([])
 
   useEffect(() => {
-    const token = (() => { try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null } })()
+    const token = getToken()
     if (!token) return
     fetch('/api/integrations', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : [])
@@ -108,31 +86,29 @@ export default function AgentDetail() {
 
   useEffect(() => {
     if (agent) {
-      setEditBio(agent.bio || '')
-      setEditTone(agent.tone || 'Friendly')
-      setEditCommStyle(agent.commStyle || 'Professional')
+      setEditBio(agent.system_prompt || '')
+      setEditTone('Friendly')
+      setEditCommStyle('Professional')
+      setSelectedModel(agent.model || 'claude-haiku-4-5')
+      setEditTopics(agent.description || '')
       setMessages([{ role: 'agent', text: `Hey! I'm ${agent.name}. How can I help you today?`, ts: getTime() }])
-      setEditTopics(agent.template || '')
     }
-  }, [agent.name])
+  }, [agent?.id])
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, thinking])
   useEffect(() => { const tab = searchParams.get('tab'); if (tab) setActiveTab(tab) }, [searchParams])
 
   const sendMessage = async () => {
-    if (!inputText.trim() || thinking) return
+    if (!inputText.trim() || thinking || !agent) return
     const userMsg: ChatMsg = { role: 'user', text: inputText.trim(), ts: getTime() }
     const currentInput = inputText.trim()
-
-    // Check if we have a real agent with auth token
-    const token = (() => { try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null } })()
-
+    const token = getToken()
     setMessages(prev => [...prev, userMsg])
     setInputText('')
     setThinking(true)
     try {
       let reply: string
-      if (token && agentData) {
+      if (token) {
         const res = await fetch(`/api/agents/${id}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -147,7 +123,7 @@ export default function AgentDetail() {
           body: JSON.stringify({
             agentId: id, message: currentInput,
             conversationHistory: messages, agentName: agent.name,
-            personality: { bio: editBio, adjectives: editAdjectives.split(',').map(s => s.trim()).filter(Boolean), communicationStyle: editCommStyle, topics: editTopics.split(',').map(s => s.trim()).filter(Boolean), forbiddenWords: editForbiddenWords || undefined },
+            personality: { bio: editBio, adjectives: editAdjectives.split(',').map((s: string) => s.trim()).filter(Boolean), communicationStyle: editCommStyle },
             model: selectedModel,
           }),
         })
@@ -162,12 +138,12 @@ export default function AgentDetail() {
   }
 
   const handleSavePersonality = async () => {
-    const token = (() => { try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null } })()
-    if (token && agentData) {
+    const token = getToken()
+    if (token && agent) {
       await fetch(`/api/agents/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ systemPrompt: editBio }),
+        body: JSON.stringify({ systemPrompt: editBio, model: selectedModel }),
       }).catch(() => {})
     }
     setSaved(true)
@@ -176,40 +152,45 @@ export default function AgentDetail() {
 
   const renderOverview = () => (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         {[
-          { label: 'Total Messages', value: (agent.messages || 0).toLocaleString(), color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20' },
-          { label: 'Uptime', value: agent.uptime || 'N/A', color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
-          { label: 'Accuracy', value: agent.accuracy || 'N/A', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
-          { label: 'Channels', value: String(agent.channels?.length || 0), color: 'text-teal-400', bg: 'bg-teal-500/10', border: 'border-teal-500/20' },
+          { label: 'Total Messages', value: (agent?.total_messages || 0).toLocaleString(), color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20' },
+          { label: 'Model', value: agent?.model || 'N/A', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
+          { label: 'Status', value: agent?.is_active ? 'Active' : 'Paused', color: agent?.is_active ? 'text-green-400' : 'text-slate-400', bg: agent?.is_active ? 'bg-green-500/10' : 'bg-slate-500/10', border: agent?.is_active ? 'border-green-500/20' : 'border-slate-500/20' },
         ].map(s => (
           <div key={s.label} className={`bg-[#111118] rounded-xl p-4 border ${s.border}`}>
             <div className={`w-9 h-9 rounded-lg ${s.bg} flex items-center justify-center mb-3`}>
               <Activity size={16} className={s.color} />
             </div>
-            <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+            <p className={`text-lg font-bold ${s.color} truncate`}>{s.value}</p>
             <p className="text-xs text-slate-500 mt-0.5">{s.label}</p>
           </div>
         ))}
       </div>
+
+      {/* Deploy Checklist */}
       <div className="bg-[#111118] rounded-xl border border-[#1e1e2e] p-5">
-        <h3 className="font-semibold text-white mb-3 text-sm">Recent Activity</h3>
-        <div className="space-y-3">
+        <h3 className="font-semibold text-white mb-3 text-sm">Deploy Checklist</h3>
+        <div className="space-y-2">
           {[
-            { text: 'Handled 12 customer inquiries', time: '2 min ago', dot: 'bg-violet-500' },
-            { text: 'Auto-escalated 1 ticket', time: '18 min ago', dot: 'bg-amber-500' },
-            { text: 'Sent daily summary report', time: '1 hr ago', dot: 'bg-blue-500' },
-            { text: 'Processed 47 messages via Telegram', time: '2 hrs ago', dot: 'bg-teal-500' },
-          ].map((item, i) => (
-            <div key={i} className="flex items-start gap-3">
-              <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${item.dot}`} />
-              <div>
-                <p className="text-sm text-slate-300">{item.text}</p>
-                <p className="text-xs text-slate-600">{item.time}</p>
+            { label: 'System prompt configured', done: !!(agent?.system_prompt && agent.system_prompt.length > 10) },
+            { label: 'AI model selected', done: !!(agent?.model) },
+            { label: 'Channel connected', done: integrationRecords.some(r => r.connected && (r.agent_id === id || !r.agent_id)) },
+          ].map(item => (
+            <div key={item.label} className="flex items-center gap-3">
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${item.done ? 'bg-green-500/20 border border-green-500/30' : 'bg-slate-800 border border-slate-700'}`}>
+                {item.done ? <Check size={11} className="text-green-400" /> : <X size={11} className="text-slate-600" />}
               </div>
+              <span className={`text-sm ${item.done ? 'text-slate-300' : 'text-slate-500'}`}>{item.label}</span>
             </div>
           ))}
         </div>
+        {!integrationRecords.some(r => r.connected) && (
+          <button onClick={() => navigate('/dashboard/integrations')}
+            className="mt-4 gradient-btn px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5">
+            <Plug size={12} /> Connect a Channel
+          </button>
+        )}
       </div>
     </div>
   )
@@ -217,11 +198,11 @@ export default function AgentDetail() {
   const renderChat = () => (
     <div className="flex flex-col h-[580px] bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
       <div className="px-4 py-3 border-b border-[#1e1e2e] flex items-center gap-3">
-        <div className="w-8 h-8 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
-          <Bot size={14} className="text-violet-400" />
+        <div className="w-8 h-8 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-sm">
+          {agent?.emoji || <Bot size={14} className="text-violet-400" />}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-white text-sm">{agent.name}</p>
+          <p className="font-semibold text-white text-sm">{agent?.name}</p>
           <p className="text-xs text-green-400 font-medium flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" /> Online
           </p>
@@ -238,8 +219,8 @@ export default function AgentDetail() {
         {messages.map((msg, i) => (
           <div key={i} className={`flex items-end gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             {msg.role === 'agent' && (
-              <div className="w-7 h-7 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0 mb-1">
-                <Bot size={12} className="text-violet-400" />
+              <div className="w-7 h-7 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0 mb-1 text-sm">
+                {agent?.emoji || <Bot size={12} className="text-violet-400" />}
               </div>
             )}
             <div className={`max-w-sm flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -276,7 +257,7 @@ export default function AgentDetail() {
       <div className="px-4 py-3 border-t border-[#1e1e2e] bg-[#111118]">
         <div className="flex gap-2 items-center">
           <input value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()}
-            placeholder={`Message ${agent.name}...`} disabled={thinking}
+            placeholder={`Message ${agent?.name || 'agent'}...`} disabled={thinking}
             className="flex-1 px-4 py-2 rounded-xl bg-white/5 border border-[#1e1e2e] text-sm focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-slate-200 placeholder-slate-600 transition-all disabled:opacity-50" />
           <button onClick={sendMessage} disabled={!inputText.trim() || thinking}
             className="gradient-btn w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-40">
@@ -290,7 +271,7 @@ export default function AgentDetail() {
   const renderPersonality = () => (
     <div className="space-y-5 bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
       <div>
-        <label className="block text-sm font-semibold text-slate-300 mb-2">System Prompt / Bio</label>
+        <label className="block text-sm font-semibold text-slate-300 mb-2">System Prompt</label>
         <textarea value={editBio} onChange={e => setEditBio(e.target.value)} rows={4}
           className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm resize-none" />
       </div>
@@ -312,7 +293,7 @@ export default function AgentDetail() {
       </div>
       <div>
         <label className="block text-sm font-semibold text-slate-300 mb-2">Personality Traits <span className="text-slate-600 font-normal">(comma-separated)</span></label>
-        <input type="text" value={editAdjectives} onChange={e => setEditAdjectives(e.target.value)} className={inputClass} />
+        <input type="text" value={editAdjectives} onChange={e => setEditAdjectives(e.target.value)} className={inputClass} placeholder="Helpful, Professional, Concise" />
       </div>
       <div>
         <label className="block text-sm font-semibold text-slate-300 mb-2">AI Model</label>
@@ -361,16 +342,7 @@ export default function AgentDetail() {
       </div>
       <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4">
         <h3 className="font-semibold text-white mb-3 text-sm flex items-center gap-2"><FileText size={14} /> Knowledge Sources</h3>
-        <div className="flex items-center justify-between p-3 bg-violet-500/10 border border-violet-500/20 rounded-xl">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-red-500/20 border border-red-500/20 flex items-center justify-center text-red-400 font-bold text-xs">PDF</div>
-            <div>
-              <p className="font-semibold text-white text-sm">Product FAQ.pdf</p>
-              <p className="text-xs text-slate-500">12 pages · 248 KB</p>
-            </div>
-          </div>
-          <button className="text-slate-600 hover:text-red-400 transition-colors p-1.5"><X size={14} /></button>
-        </div>
+        <p className="text-xs text-slate-600">No knowledge sources added yet.</p>
       </div>
     </div>
   )
@@ -407,7 +379,12 @@ export default function AgentDetail() {
           </div>
         )}
         <div className="divide-y divide-[#1e1e2e]">
-          {commands.map((cmd, i) => (
+          {commands.length === 0 ? (
+            <div className="p-8 text-center">
+              <Terminal size={20} className="text-slate-700 mx-auto mb-2" />
+              <p className="text-xs text-slate-600">No commands yet. Add your first command.</p>
+            </div>
+          ) : commands.map((cmd, i) => (
             <div key={i} className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
               <div className="flex items-center gap-3">
                 <span className="font-mono text-xs font-bold text-violet-400 bg-violet-500/10 border border-violet-500/20 px-2 py-1 rounded-lg">{cmd.trigger}</span>
@@ -432,10 +409,10 @@ export default function AgentDetail() {
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between mb-1">
-          <p className="text-sm text-slate-500">Integrations connected to this agent.</p>
-          <a href="/integrations" className="text-xs text-violet-400 hover:text-violet-300 underline underline-offset-2 flex items-center gap-1">
-            <Plug size={11} /> Add Integration
-          </a>
+          <p className="text-sm text-slate-500">Channels connected to your account.</p>
+          <button onClick={() => navigate('/dashboard/integrations')} className="text-xs text-violet-400 hover:text-violet-300 underline underline-offset-2 flex items-center gap-1">
+            <Plug size={11} /> Manage Integrations
+          </button>
         </div>
         {intgList.map(intg => {
           const rec = integrationRecords.find(r => r.type === intg.id)
@@ -455,7 +432,9 @@ export default function AgentDetail() {
                   <Check size={10} /> Live
                 </span>
               ) : (
-                <span className="text-xs text-slate-600 px-2 py-1">Not connected</span>
+                <button onClick={() => navigate('/dashboard/integrations')} className="text-xs text-violet-400 hover:text-violet-300 px-2 py-1 border border-violet-500/20 rounded-lg hover:bg-violet-500/10 transition-colors">
+                  Connect
+                </button>
               )}
             </div>
           )
@@ -470,7 +449,7 @@ export default function AgentDetail() {
         {tab === 'analytics' ? <BarChart2 size={24} className="text-violet-400" /> : <Settings size={24} className="text-violet-400" />}
       </div>
       <h3 className="text-base font-bold text-white mb-2">{tab === 'analytics' ? 'Analytics Coming Soon' : 'Settings'}</h3>
-      <p className="text-slate-500 text-sm max-w-xs mx-auto">{tab === 'analytics' ? 'Detailed analytics will be available here soon.' : 'Advanced agent settings will appear here.'}</p>
+      <p className="text-slate-500 text-sm max-w-xs mx-auto">{tab === 'analytics' ? 'Detailed per-agent analytics will be available here soon.' : 'Advanced agent settings will appear here.'}</p>
     </div>
   )
 
@@ -480,31 +459,52 @@ export default function AgentDetail() {
     analytics: () => renderEmptyTab('analytics'), settings: () => renderEmptyTab('settings'),
   }
 
+  if (agentLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center py-32">
+          <Loader2 size={28} className="animate-spin text-violet-400" />
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  if (notFound || !agent) {
+    return (
+      <DashboardLayout>
+        <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-16 text-center">
+          <Bot size={32} className="text-slate-600 mx-auto mb-3" />
+          <h3 className="text-base font-bold text-white mb-2">Agent not found</h3>
+          <p className="text-slate-500 text-sm mb-5">This agent doesn't exist or you don't have access.</p>
+          <button onClick={() => navigate('/dashboard/agents')} className="gradient-btn px-5 py-2 rounded-xl font-semibold text-sm">
+            Back to Agents
+          </button>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
   return (
     <DashboardLayout>
       {/* Agent Header */}
       <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-5">
         <div className="flex items-start gap-4 flex-wrap">
-          <div className="w-14 h-14 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0">
-            <Bot size={24} className="text-violet-400" />
+          <div className="w-14 h-14 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0 text-2xl">
+            {agent.emoji || '🤖'}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 flex-wrap mb-1">
               <h1 className="text-xl font-bold text-white">{agent.name}</h1>
               <span className={`flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border ${
-                agent.status === 'active' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                agent.is_active ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
               }`}>
-                <Circle size={5} className={agent.status === 'active' ? 'fill-green-400' : 'fill-slate-400'} />
-                {agent.status === 'active' ? 'Active' : 'Paused'}
+                <Circle size={5} className={agent.is_active ? 'fill-green-400' : 'fill-slate-400'} />
+                {agent.is_active ? 'Active' : 'Paused'}
               </span>
             </div>
-            <p className="text-slate-500 text-sm mb-2">{agent.template || 'Custom Agent'} · {agent.model}</p>
+            <p className="text-slate-500 text-sm mb-2">{agent.description || 'Custom Agent'} · {agent.model}</p>
             <div className="flex items-center gap-4 flex-wrap text-sm text-slate-500">
-              <span className="flex items-center gap-1.5"><MessageSquare size={13} className="text-violet-400" /> {(agent.messages || 0).toLocaleString()} messages</span>
-              <span className="flex items-center gap-1.5"><Activity size={13} className="text-green-400" /> {agent.uptime || 'N/A'} uptime</span>
-              {(agent.channels || []).map((c: string) => (
-                <span key={c} className="bg-violet-500/10 text-violet-400 border border-violet-500/20 text-xs font-semibold px-2 py-0.5 rounded-full">{c}</span>
-              ))}
+              <span className="flex items-center gap-1.5"><MessageSquare size={13} className="text-violet-400" /> {(agent.total_messages || 0).toLocaleString()} messages</span>
             </div>
           </div>
           <div className="flex gap-2 flex-shrink-0">
@@ -521,10 +521,10 @@ export default function AgentDetail() {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 bg-[#111118] border border-[#1e1e2e] rounded-xl p-1.5 mb-5 overflow-x-auto flex-nowrap">
-        {TABS.map(({ id, label, icon: Icon }) => (
-          <button key={id} onClick={() => setActiveTab(id)}
+        {TABS.map(({ id: tabId, label, icon: Icon }) => (
+          <button key={tabId} onClick={() => setActiveTab(tabId)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
-              activeTab === id ? 'gradient-btn' : 'text-slate-500 hover:text-slate-200 hover:bg-white/5'
+              activeTab === tabId ? 'gradient-btn' : 'text-slate-500 hover:text-slate-200 hover:bg-white/5'
             }`}>
             <Icon size={13} />
             {label}
@@ -536,6 +536,3 @@ export default function AgentDetail() {
     </DashboardLayout>
   )
 }
-
-
-

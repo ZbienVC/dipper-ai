@@ -8,6 +8,7 @@ interface IntegrationRecord {
   type: string
   connected: boolean
   bot_info?: string
+  agent_id?: string
   created_at: string
 }
 
@@ -99,7 +100,23 @@ export default function Integrations() {
       .catch(() => {})
   }
 
-  useEffect(() => { fetchIntegrations(); fetchAgents() }, [])
+  useEffect(() => {
+    // Pre-populate assignMap from loaded records
+    const map: Record<string, string> = {}
+    records.forEach(r => { if (r.agent_id) map[r.type] = r.agent_id })
+    setAssignMap(map)
+  }, [records])
+
+  const handleAssign = async (type: string, agentId: string) => {
+    setAssignMap(prev => ({ ...prev, [type]: agentId }))
+    const token = getToken()
+    if (!token) return
+    await fetch(`/api/integrations/${type}/assign`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: agentId || null }),
+    }).catch(() => {})
+  }
 
   const openModal = (type: string) => {
     setActiveType(type)
@@ -181,7 +198,7 @@ export default function Integrations() {
                     <label className="block text-xs text-slate-500 mb-1">Assign to Agent</label>
                     <select
                       value={assignMap[type] || ''}
-                      onChange={e => setAssignMap(prev => ({ ...prev, [type]: e.target.value }))}
+                      onChange={e => handleAssign(type, e.target.value)}
                       className="w-full px-3 py-2 rounded-xl bg-white/5 border border-[#1e1e2e] text-white text-xs focus:outline-none focus:ring-1 focus:ring-violet-500/50"
                     >
                       <option value="">Select an agent...</option>
