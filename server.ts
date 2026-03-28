@@ -10,7 +10,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
-import { GoogleGenerativeAI } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -115,15 +115,16 @@ async function callAI(provider: string, model: string, systemPrompt: string, mes
     return response.choices[0].message.content || '';
   }
   if (provider === 'google') {
-    const client = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-    const geminiModel = client.getGenerativeModel({ model });
-    const chat = geminiModel.startChat({
+    const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+    const chat = client.chats.create({
+      model,
       history: messages.slice(0, -1).map((m: any) => ({
-        role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }],
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
       })),
     });
-    const result = await chat.sendMessage(messages[messages.length - 1].content);
-    return result.response.text();
+    const result = await chat.sendMessage({ message: messages[messages.length - 1].content });
+    return result.text || '';
   }
   throw new Error(`Unknown provider: ${provider}`);
 }
