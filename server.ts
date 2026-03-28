@@ -278,6 +278,15 @@ async function startServer() {
     }
   });
 
+  // Test AI connectivity
+  app.get('/api/test-ai', async (_req, res) => {
+    try {
+      const content = await callAI('anthropic', 'claude-haiku-4-5', 'You are a test bot.', [{ role: 'user', content: 'Say OK' }]);
+      res.json({ status: 'ok', reply: content });
+    } catch (e: any) {
+      res.status(500).json({ status: 'error', error: e?.message, details: e?.error });
+    }
+  });
   // Analytics
   app.get('/api/analytics', auth, (req: any, res) => {
     const agents = db.data.agents.filter(a => a.user_id === req.userId && a.is_active);
@@ -303,6 +312,7 @@ async function startServer() {
 }
 
 startServer().catch(console.error);
+
 
 
 
