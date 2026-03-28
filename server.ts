@@ -222,8 +222,17 @@ async function startServer() {
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
     if (!checkLimit(req.user, 'messages'))
       return res.status(429).json({ error: 'Daily message limit reached.' });
-    const { message, conversationId } = req.body;
+    const { message, conversationId, model: requestedModel } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
+    
+    // Sanitize model name — fix incomplete IDs
+    const modelMap: Record<string, string> = {
+      'claude-3-5-haiku': 'claude-3-5-haiku-20241022',
+      'claude-3-5-sonnet': 'claude-3-5-sonnet-20241022',
+      'claude-3-opus': 'claude-3-opus-20240229',
+    };
+    const activeModel = modelMap[requestedModel || agent.model] || requestedModel || agent.model;
+    const activeProvider = activeModel.startsWith('gpt') ? 'openai' : activeModel.startsWith('gemini') ? 'google' : 'anthropic';
 
     let convId = conversationId;
     if (!convId) {
@@ -235,9 +244,9 @@ async function startServer() {
     history.push({ role: 'user', content: message });
 
     try {
-      const content = await callAI(agent.provider, agent.model, agent.system_prompt, history);
+      const content = await callAI(activeProvider, activeModel, agent.system_prompt, history);
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
-      db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: agent.model, created_at: new Date().toISOString() });
+      db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: activeModel, created_at: new Date().toISOString() });
       agent.total_messages++;
       req.user.messages_today++;
       save();
@@ -292,5 +301,6 @@ async function startServer() {
 }
 
 startServer().catch(console.error);
+
 
 
