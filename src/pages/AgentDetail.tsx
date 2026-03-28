@@ -19,7 +19,7 @@ const TABS = [
 ]
 
 interface ChatMsg { role: 'user' | 'agent'; text: string; ts: string }
-interface Command { trigger: string; response: string }
+interface Command { trigger: string; response: string; description?: string }
 
 function getTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -73,6 +73,7 @@ export default function AgentDetail() {
   const [showAddCommand, setShowAddCommand] = useState(false)
   const [newTrigger, setNewTrigger] = useState('')
   const [newResponse, setNewResponse] = useState('')
+  const [newDescription, setNewDescription] = useState('')
   const [integrationRecords, setIntegrationRecords] = useState<{ type: string; connected: boolean; bot_info?: string; agent_id?: string }[]>([])
 
   useEffect(() => {
@@ -359,22 +360,33 @@ export default function AgentDetail() {
         </div>
         {showAddCommand && (
           <div className="p-4 bg-violet-500/5 border-b border-[#1e1e2e] space-y-3">
+            <p className="text-xs text-slate-500">Commands let users type a keyword to trigger a specific response. For example, type <code className="text-violet-400 bg-violet-500/10 px-1 rounded">/hours</code> → agent replies with your hours.</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1">Trigger</label>
-                <input type="text" value={newTrigger} onChange={e => setNewTrigger(e.target.value)} placeholder="/command"
+                <label className="block text-xs font-semibold text-slate-400 mb-1">Trigger word</label>
+                <input type="text" value={newTrigger} onChange={e => setNewTrigger(e.target.value)} placeholder="/hours"
                   className="w-full px-3 py-2 rounded-lg bg-white/5 border border-[#1e1e2e] text-sm focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white font-mono" />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1">Response</label>
-                <input type="text" value={newResponse} onChange={e => setNewResponse(e.target.value)} placeholder="Agent reply..."
+                <label className="block text-xs font-semibold text-slate-400 mb-1">Agent reply</label>
+                <input type="text" value={newResponse} onChange={e => setNewResponse(e.target.value)} placeholder="We're open 9-5 Mon-Fri"
                   className="w-full px-3 py-2 rounded-lg bg-white/5 border border-[#1e1e2e] text-sm focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white" />
               </div>
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">Description <span className="text-slate-600 font-normal">(shown in /help list)</span></label>
+              <input type="text" value={newDescription} onChange={e => setNewDescription(e.target.value)} placeholder="Shows our business hours"
+                className="w-full px-3 py-2 rounded-lg bg-white/5 border border-[#1e1e2e] text-sm focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white" />
+            </div>
             <div className="flex gap-2">
-              <button onClick={() => { if (newTrigger && newResponse) { setCommands(prev => [...prev, { trigger: newTrigger, response: newResponse }]); setNewTrigger(''); setNewResponse(''); setShowAddCommand(false) } }}
-                className="gradient-btn px-3 py-1.5 rounded-lg text-xs font-semibold">Save</button>
-              <button onClick={() => setShowAddCommand(false)} className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#1e1e2e] text-slate-400 hover:bg-white/5">Cancel</button>
+              <button onClick={() => {
+                if (!newTrigger.trim() || !newResponse.trim()) return
+                setCommands(prev => [...prev, { trigger: newTrigger.trim(), response: newResponse.trim(), description: newDescription.trim() }])
+                setNewTrigger(''); setNewResponse(''); setNewDescription(''); setShowAddCommand(false)
+              }} className="gradient-btn px-4 py-2 rounded-lg text-xs font-semibold">
+                Save Command
+              </button>
+              <button onClick={() => setShowAddCommand(false)} className="px-3 py-2 rounded-lg text-xs font-semibold border border-[#1e1e2e] text-slate-400 hover:bg-white/5">Cancel</button>
             </div>
           </div>
         )}
@@ -536,3 +548,5 @@ export default function AgentDetail() {
     </DashboardLayout>
   )
 }
+
+

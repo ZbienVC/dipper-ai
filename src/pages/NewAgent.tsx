@@ -99,18 +99,30 @@ export default function NewAgent() {
         ? `${state.systemPrompt || ''}\n\nYou are ${state.name}. ${state.bio}\n\nPersonality: ${state.adjectives.join(', ')}\nTopics: ${state.topics.join(', ')}\nTone: ${state.tone}\nCommunication style: ${state.commStyle}${state.forbiddenWords ? `\nNever use: ${state.forbiddenWords}` : ''}`
         : `You are ${state.name}, an AI assistant. Be ${state.tone.toLowerCase()} and ${state.commStyle.toLowerCase()}.`
 
-      if (token) {
-        const res = await fetch('/api/agents', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ name: state.name, description: state.bio, systemPrompt, model: state.model, provider: state.provider }),
-        })
-        await res.json()
+      if (!token) {
+        // not logged in — still show launched screen, just no agent saved
+        setSaving(false)
+        setLaunched(true)
+        setTimeout(() => navigate('/dashboard/agents'), 1500)
+        return
       }
-    } catch {}
+      const res = await fetch('/api/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: state.name, description: state.bio, systemPrompt, model: state.model, provider: state.provider }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || `Server error ${res.status}`)
+      }
+    } catch (e: any) {
+      setSaving(false)
+      alert('Failed to create agent: ' + (e?.message || 'Unknown error'))
+      return
+    }
     setSaving(false)
     setLaunched(true)
-    setTimeout(() => navigate('/dashboard/agents'), 2500)
+    setTimeout(() => navigate('/dashboard/agents'), 1500)
   }
 
   const progressPct = ((step) / (STEPS.length - 1)) * 100
@@ -468,3 +480,5 @@ export default function NewAgent() {
     </DashboardLayout>
   )
 }
+
+

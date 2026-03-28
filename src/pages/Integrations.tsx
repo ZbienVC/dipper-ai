@@ -119,6 +119,7 @@ export default function Integrations() {
   }
 
   const openModal = (type: string) => {
+    if (!getToken()) { alert('Please log in first'); return }
     setActiveType(type)
     setStep('instructions')
     setFormValues({})
@@ -312,3 +313,4 @@ export default function Integrations() {
     </DashboardLayout>
   )
 }
+
