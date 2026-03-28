@@ -5,7 +5,6 @@ dotenv.config();
 
 import { randomUUID } from 'crypto';
 import { Low } from 'lowdb';
-import { JSONFileSync } from 'lowdb/node';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import Anthropic from '@anthropic-ai/sdk';
@@ -40,11 +39,7 @@ type Integration = {
 
 type DBSchema = { users: User[]; agents: Agent[]; conversations: Conversation[]; messages: Message[]; integrations: Integration[]; };
 
-const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'dipperai.json');
-const adapter = new JSONFileSync<DBSchema>(dbPath);
-const db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [] });
-try { db.read(); } catch { /* fresh db */ }
-const save = () => { try { db.write(); } catch { /* ignore write errors */ } };
+// DB initialized in startServer()
 
 // ─── Plan Limits ─────────────────────────────────────────────────────────────
 const PLAN_LIMITS: Record<string, { agents: number; messagesPerDay: number }> = {
@@ -142,26 +137,49 @@ function decodeCredentials(creds: Record<string, string>): Record<string, string
 }
 
 // ─── Express ──────────────────────────────────────────────────────────────────
+let db: Low<DBSchema>;
+const save = () => { try { db.write(); } catch { /* in-memory mode */ } };
+
 async function startServer() {
+  // Initialize DB
+  const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'dipperai.json');
+  try {
+    const { JSONFileSync } = await import('lowdb/node');
+    const adapter = new JSONFileSync<DBSchema>(dbPath);
+    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [] });
+    try { db.read(); } catch { /* fresh */ }
+    db.write(); // test write access
+    console.log('[DipperAI] File DB:', dbPath);
+  } catch {
+    console.warn('[DipperAI] Read-only filesystem, using in-memory DB');
+    const { MemorySync } = await import('lowdb');
+    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [] });
+  }
+
   const app = express();
   app.use(cors({ origin: true, credentials: true }));
   app.use(express.json());
 
   // Auth
   app.post('/api/auth/register', async (req, res) => {
-    const { email, username, password } = req.body;
-    if (!email || !username || !password) return res.status(400).json({ error: 'Missing fields' });
-    if (findUserByEmail(email)) return res.status(409).json({ error: 'Email already taken' });
-    if (db.data.users.find(u => u.username === username)) return res.status(409).json({ error: 'Username already taken' });
-    const id = randomUUID();
-    const user: User = {
-      id, email: email.toLowerCase(), username, password_hash: await bcrypt.hash(password, 10),
-      plan: 'free', messages_today: 0, messages_reset_date: '', created_at: new Date().toISOString(),
-    };
-    db.data.users.push(user);
-    save();
-    const token = jwt.sign({ userId: id }, JWT_SECRET, { expiresIn: '30d' });
-    res.json({ token, user: { id, email: user.email, username, plan: 'free' } });
+    try {
+      const { email, username, password } = req.body;
+      if (!email || !username || !password) return res.status(400).json({ error: 'Missing fields' });
+      if (findUserByEmail(email)) return res.status(409).json({ error: 'Email already taken' });
+      if (db.data.users.find(u => u.username === username)) return res.status(409).json({ error: 'Username already taken' });
+      const id = randomUUID();
+      const user: User = {
+        id, email: email.toLowerCase(), username, password_hash: await bcrypt.hash(password, 10),
+        plan: 'free', messages_today: 0, messages_reset_date: '', created_at: new Date().toISOString(),
+      };
+      db.data.users.push(user);
+      save();
+      const token = jwt.sign({ userId: id }, JWT_SECRET, { expiresIn: '30d' });
+      res.json({ token, user: { id, email: user.email, username, plan: 'free' } });
+    } catch (e: any) {
+      console.error('[register error]', e?.message);
+      res.status(500).json({ error: 'Registration failed: ' + (e?.message || 'Unknown error') });
+    }
   });
 
   app.post('/api/auth/login', async (req, res) => {
@@ -545,6 +563,7 @@ async function startServer() {
 }
 
 startServer().catch(console.error);
+
 
 
 
