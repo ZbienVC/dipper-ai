@@ -82,12 +82,54 @@ type UserMemory = {
   updated_at: string;
 };
 
+type Automation = {
+  id: string;
+  user_id: string;
+  agent_id: string;
+  name: string;
+  description?: string;
+  trigger_type: 'schedule' | 'manual';
+  trigger_config: {
+    cron?: string;
+    timezone?: string;
+    label?: string;
+  };
+  action_type: 'send_message' | 'post_to_channel' | 'send_ai_response';
+  action_config: {
+    channel: 'telegram' | 'sms' | 'discord';
+    recipient?: string;
+    message_template?: string;
+    ai_prompt?: string;
+    topic?: string;
+  };
+  is_active: boolean;
+  run_count: number;
+  last_run_at?: string;
+  next_run_at?: string;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type AutomationRun = {
+  id: string;
+  automation_id: string;
+  user_id: string;
+  status: 'success' | 'error' | 'skipped';
+  output?: string;
+  error_message?: string;
+  started_at: string;
+  completed_at?: string;
+};
+
 type DBSchema = {
   users: User[]; agents: Agent[]; conversations: Conversation[];
   messages: Message[]; integrations: Integration[];
   scheduled_messages: ScheduledMessage[];
   activity_logs: ActivityLog[];
   user_memories: UserMemory[];
+  automations: Automation[];
+  automation_runs: AutomationRun[];
 };
 
 // ─── Plan Definitions ─────────────────────────────────────────────────────────
@@ -346,8 +388,171 @@ function buildMemoryContext(agentId: string, userIdentifier: string, channel: st
   return lines.join('\n');
 }
 
-// ─── In-memory cron runner ────────────────────────────────────────────────────
-function parseCronMinute(expr: string): boolean {
+// ─── Automation Helpers ───────────────────────────────────────────────────────
+
+function getNextRunAt(cronExpression: string, timezone?: string): string {
+  try {
+    const parts = cronExpression.trim().split(/\s+/);
+    if (parts.length !== 5) throw new Error('invalid cron');
+    const [minuteField, hourField, , , dowField] = parts;
+
+    const now = new Date();
+    const candidate = new Date(now);
+    candidate.setSeconds(0, 0);
+    candidate.setMinutes(candidate.getMinutes() + 1); // start from next minute
+
+    // Resolve minute
+    let targetMinute: number;
+    if (minuteField === '*') targetMinute = candidate.getMinutes();
+    else if (minuteField.startsWith('*/')) {
+      const step = parseInt(minuteField.slice(2));
+      const cur = candidate.getMinutes();
+      const next = cur + (step - (cur % step));
+      targetMinute = next >= 60 ? 0 : next;
+      if (next >= 60) candidate.setHours(candidate.getHours() + 1);
+    } else targetMinute = parseInt(minuteField);
+
+    // Resolve hour
+    let targetHour: number;
+    if (hourField === '*') targetHour = candidate.getHours();
+    else targetHour = parseInt(hourField);
+
+    candidate.setMinutes(targetMinute, 0, 0);
+    candidate.setHours(targetHour);
+
+    // If candidate is in the past (for this day), advance by 1 day
+    if (candidate <= now) {
+      candidate.setDate(candidate.getDate() + 1);
+    }
+
+    // Day of week handling
+    if (dowField !== '*') {
+      const targetDow = parseInt(dowField);
+      while (candidate.getDay() !== targetDow) {
+        candidate.setDate(candidate.getDate() + 1);
+      }
+    }
+
+    return candidate.toISOString();
+  } catch {
+    // fallback: 24h from now
+    return new Date(Date.now() + 86400000).toISOString();
+  }
+}
+
+async function executeAutomation(automation: Automation): Promise<AutomationRun> {
+  if (!db.data.automation_runs) db.data.automation_runs = [];
+  const startedAt = new Date().toISOString();
+  const runId = randomUUID();
+
+  const run: AutomationRun = {
+    id: runId,
+    automation_id: automation.id,
+    user_id: automation.user_id,
+    status: 'success',
+    started_at: startedAt,
+  };
+
+  try {
+    const agent = db.data.agents.find(a => a.id === automation.agent_id);
+    if (!agent) throw new Error('Agent not found');
+
+    let outputText = '';
+
+    if (automation.action_type === 'send_message') {
+      outputText = automation.action_config.message_template || '';
+    } else {
+      // send_ai_response or post_to_channel — generate with AI
+      const prompt = automation.action_config.ai_prompt || automation.action_config.topic || 'Generate a helpful message.';
+      const { text } = await callAI(agent.provider, agent.model, agent.system_prompt, [{ role: 'user', content: prompt }], 512);
+      outputText = text;
+    }
+
+    // Send via channel
+    const channel = automation.action_config.channel;
+    const recipient = automation.action_config.recipient;
+
+    if (channel === 'telegram') {
+      const botToken = agent.deployed_telegram_token;
+      if (!botToken) throw new Error('No Telegram bot token configured on agent');
+      if (!recipient) throw new Error('No recipient (chat_id) configured');
+      const resp = await sendTelegramMessage(botToken, recipient, outputText);
+      if (!resp.ok) throw new Error(`Telegram API error: ${resp.status}`);
+    } else if (channel === 'sms') {
+      const integration = db.data.integrations.find(i => i.user_id === automation.user_id && i.type === 'twilio' && i.connected);
+      if (!integration) throw new Error('No Twilio integration connected');
+      const creds = decodeCredentials(integration.credentials);
+      const body = new URLSearchParams({
+        From: creds.from_number || '', To: recipient || '', Body: outputText,
+      });
+      const twilioResp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${creds.account_sid}/Messages.json`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Basic ' + Buffer.from(`${creds.account_sid}:${creds.auth_token}`).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+      if (!twilioResp.ok) throw new Error(`Twilio error: ${twilioResp.status}`);
+    } else if (channel === 'discord') {
+      const webhookUrl = agent.deployed_discord_webhook || automation.action_config.recipient;
+      if (!webhookUrl) throw new Error('No Discord webhook configured');
+      const resp = await fetch(webhookUrl, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: outputText }),
+      });
+      if (!resp.ok) throw new Error(`Discord webhook error: ${resp.status}`);
+    }
+
+    run.output = outputText;
+    run.status = 'success';
+    automation.last_error = undefined;
+  } catch (e: any) {
+    run.status = 'error';
+    run.error_message = e?.message || 'Unknown error';
+    automation.last_error = run.error_message;
+  }
+
+  run.completed_at = new Date().toISOString();
+  db.data.automation_runs.push(run);
+
+  // Update automation stats
+  automation.run_count = (automation.run_count || 0) + 1;
+  automation.last_run_at = startedAt;
+  if (automation.trigger_type === 'schedule' && automation.trigger_config?.cron) {
+    automation.next_run_at = getNextRunAt(automation.trigger_config.cron, automation.trigger_config.timezone);
+  }
+  automation.updated_at = new Date().toISOString();
+
+  logActivity({
+    user_id: automation.user_id,
+    agent_id: automation.agent_id,
+    agent_name: db.data.agents.find(a => a.id === automation.agent_id)?.name || 'Unknown',
+    event_type: 'automation_triggered',
+    channel: (automation.action_config.channel as any) || 'system',
+    summary: `Automation "${automation.name}" ${run.status === 'success' ? 'ran successfully' : 'failed'}`,
+    details: run.output?.slice(0, 200) || run.error_message,
+    status: run.status === 'success' ? 'success' : 'error',
+    error_message: run.error_message,
+  });
+
+  save();
+  return run;
+}
+
+function startAutomationRunner() {
+  setInterval(async () => {
+    if (!db?.data?.automations) return;
+    const now = new Date();
+    const active = db.data.automations.filter(a => a.is_active && a.next_run_at);
+    for (const automation of active) {
+      if (!automation.next_run_at) continue;
+      const nextRun = new Date(automation.next_run_at);
+      if (now >= nextRun) {
+        executeAutomation(automation).catch(e => console.error('[automation-runner]', e));
+      }
+    }
+  }, 60000);
+}
+
+// ─── In-memory cron runner ────────────────────────────────────────────────────function parseCronMinute(expr: string): boolean {
   try {
     const parts = expr.trim().split(/\s+/);
     if (parts.length !== 5) return false;
@@ -403,20 +608,23 @@ async function startServer() {
   try {
     const { JSONFileSync } = await import('lowdb/node');
     const adapter = new JSONFileSync<DBSchema>(dbPath);
-    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [] });
+    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [] });
     try { db.read(); } catch { /* fresh */ }
     if (!db.data.scheduled_messages) db.data.scheduled_messages = [];
     if (!db.data.activity_logs) db.data.activity_logs = [];
     if (!db.data.user_memories) db.data.user_memories = [];
+    if (!db.data.automations) db.data.automations = [];
+    if (!db.data.automation_runs) db.data.automation_runs = [];
     db.write();
     console.log('[DipperAI] File DB:', dbPath);
   } catch {
     console.warn('[DipperAI] Read-only filesystem, using in-memory DB');
     const { MemorySync } = await import('lowdb');
-    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [] });
+    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [] });
   }
 
   startCronRunner();
+  startAutomationRunner();
 
   const app = express();
   app.use(cors({ origin: true, credentials: true }));
@@ -1214,6 +1422,128 @@ async function startServer() {
     agent.updated_at = new Date().toISOString();
     save();
     res.json(agent);
+  });
+
+  // ─── Automation Routes ────────────────────────────────────────────────────
+
+  // GET /api/automations
+  app.get('/api/automations', auth, (req: any, res) => {
+    if (!db.data.automations) db.data.automations = [];
+    if (!db.data.automation_runs) db.data.automation_runs = [];
+    const automations = db.data.automations.filter(a => a.user_id === req.userId);
+    const today = new Date().toISOString().split('T')[0];
+    const result = automations.map(a => {
+      const runs = db.data.automation_runs.filter(r => r.automation_id === a.id);
+      const todayRuns = runs.filter(r => r.started_at.startsWith(today));
+      const agent = db.data.agents.find(ag => ag.id === a.agent_id);
+      return { ...a, agent_name: agent?.name || 'Unknown', runs_today: todayRuns.length, total_runs: runs.length };
+    });
+    res.json(result);
+  });
+
+  // POST /api/automations
+  app.post('/api/automations', auth, (req: any, res) => {
+    if (!db.data.automations) db.data.automations = [];
+    const { name, description, agent_id, trigger_type, trigger_config, action_type, action_config } = req.body;
+    if (!name || !agent_id || !action_type || !action_config) return res.status(400).json({ error: 'Missing required fields' });
+    const agent = findAgent(agent_id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const now = new Date().toISOString();
+    const next_run_at = trigger_type === 'schedule' && trigger_config?.cron
+      ? getNextRunAt(trigger_config.cron, trigger_config.timezone)
+      : undefined;
+    const automation: Automation = {
+      id: randomUUID(), user_id: req.userId, agent_id, name,
+      description, trigger_type: trigger_type || 'manual',
+      trigger_config: trigger_config || {},
+      action_type, action_config,
+      is_active: true, run_count: 0,
+      next_run_at, created_at: now, updated_at: now,
+    };
+    db.data.automations.push(automation);
+    save();
+    res.json(automation);
+  });
+
+  // GET /api/automations/:id
+  app.get('/api/automations/:id', auth, (req: any, res) => {
+    if (!db.data.automations) return res.status(404).json({ error: 'Not found' });
+    const automation = db.data.automations.find(a => a.id === req.params.id && a.user_id === req.userId);
+    if (!automation) return res.status(404).json({ error: 'Automation not found' });
+    res.json(automation);
+  });
+
+  // PATCH /api/automations/:id
+  app.patch('/api/automations/:id', auth, async (req: any, res) => {
+    if (!db.data.automations) return res.status(404).json({ error: 'Not found' });
+    const automation = db.data.automations.find(a => a.id === req.params.id && a.user_id === req.userId);
+    if (!automation) return res.status(404).json({ error: 'Automation not found' });
+    const { name, description, agent_id, trigger_type, trigger_config, action_type, action_config } = req.body;
+    if (name !== undefined) automation.name = name;
+    if (description !== undefined) automation.description = description;
+    if (agent_id !== undefined) automation.agent_id = agent_id;
+    if (trigger_type !== undefined) automation.trigger_type = trigger_type;
+    if (trigger_config !== undefined) automation.trigger_config = trigger_config;
+    if (action_type !== undefined) automation.action_type = action_type;
+    if (action_config !== undefined) automation.action_config = action_config;
+    if (automation.trigger_type === 'schedule' && automation.trigger_config?.cron) {
+      automation.next_run_at = getNextRunAt(automation.trigger_config.cron, automation.trigger_config.timezone);
+    }
+    automation.updated_at = new Date().toISOString();
+    save();
+    res.json(automation);
+  });
+
+  // DELETE /api/automations/:id
+  app.delete('/api/automations/:id', auth, (req: any, res) => {
+    if (!db.data.automations) return res.status(404).json({ error: 'Not found' });
+    const idx = db.data.automations.findIndex(a => a.id === req.params.id && a.user_id === req.userId);
+    if (idx === -1) return res.status(404).json({ error: 'Automation not found' });
+    db.data.automations.splice(idx, 1);
+    if (db.data.automation_runs) {
+      db.data.automation_runs = db.data.automation_runs.filter(r => r.automation_id !== req.params.id);
+    }
+    save();
+    res.json({ success: true });
+  });
+
+  // PATCH /api/automations/:id/toggle
+  app.patch('/api/automations/:id/toggle', auth, (req: any, res) => {
+    if (!db.data.automations) return res.status(404).json({ error: 'Not found' });
+    const automation = db.data.automations.find(a => a.id === req.params.id && a.user_id === req.userId);
+    if (!automation) return res.status(404).json({ error: 'Automation not found' });
+    automation.is_active = !automation.is_active;
+    if (automation.is_active && automation.trigger_type === 'schedule' && automation.trigger_config?.cron) {
+      automation.next_run_at = getNextRunAt(automation.trigger_config.cron, automation.trigger_config.timezone);
+    }
+    automation.updated_at = new Date().toISOString();
+    save();
+    res.json(automation);
+  });
+
+  // POST /api/automations/:id/run — manual trigger
+  app.post('/api/automations/:id/run', auth, async (req: any, res) => {
+    if (!db.data.automations) return res.status(404).json({ error: 'Not found' });
+    const automation = db.data.automations.find(a => a.id === req.params.id && a.user_id === req.userId);
+    if (!automation) return res.status(404).json({ error: 'Automation not found' });
+    try {
+      const run = await executeAutomation(automation);
+      res.json(run);
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || 'Run failed' });
+    }
+  });
+
+  // GET /api/automations/:id/runs
+  app.get('/api/automations/:id/runs', auth, (req: any, res) => {
+    if (!db.data.automation_runs) return res.json([]);
+    const automation = db.data.automations?.find(a => a.id === req.params.id && a.user_id === req.userId);
+    if (!automation) return res.status(404).json({ error: 'Automation not found' });
+    const runs = db.data.automation_runs
+      .filter(r => r.automation_id === req.params.id)
+      .sort((a, b) => b.started_at.localeCompare(a.started_at))
+      .slice(0, 50);
+    res.json(runs);
   });
 
   // ─── Frontend ─────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import Integrations from './pages/Integrations'
 import Approvals from './pages/Approvals'
 import Analytics from './pages/Analytics'
 import ActivityPage from './pages/Activity'
+import Automations from './pages/Automations'
 import Settings from './pages/Settings'
 import Billing from './pages/Billing'
 import Admin from './pages/Admin'
@@ -47,6 +48,7 @@ function App() {
         <Route path="/dashboard/approvals" element={<PrivateRoute><Approvals /></PrivateRoute>} />
         <Route path="/dashboard/analytics" element={<PrivateRoute><Analytics /></PrivateRoute>} />
         <Route path="/dashboard/activity" element={<PrivateRoute><ActivityPage /></PrivateRoute>} />
+        <Route path="/dashboard/automations" element={<PrivateRoute><Automations /></PrivateRoute>} />
         <Route path="/dashboard/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
         <Route path="/dashboard/billing" element={<PrivateRoute><Billing /></PrivateRoute>} />
 

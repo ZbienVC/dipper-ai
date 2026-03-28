@@ -13,6 +13,7 @@ const navItems = [
   { icon: Plug, label: 'Integrations', path: '/dashboard/integrations' },
   { icon: CheckSquare, label: 'Approvals', path: '/dashboard/approvals' },
   { icon: Activity, label: 'Activity', path: '/dashboard/activity' },
+  { icon: Zap, label: 'Automations', path: '/dashboard/automations' },
   { icon: BarChart2, label: 'Analytics', path: '/dashboard/analytics' },
   { icon: CreditCard, label: 'Billing', path: '/dashboard/billing' },
   { icon: Settings, label: 'Settings', path: '/dashboard/settings' },
