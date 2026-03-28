@@ -127,7 +127,7 @@ export default function AgentDetail() {
         const res = await fetch(`/api/agents/${id}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ message: currentInput }),
+          body: JSON.stringify({ message: currentInput, model: selectedModel }),
         })
         const data = await res.json()
         reply = data.content || data.error || 'Something went wrong.'
@@ -513,4 +513,5 @@ export default function AgentDetail() {
     </DashboardLayout>
   )
 }
+
 

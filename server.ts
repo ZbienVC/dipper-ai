@@ -252,7 +252,8 @@ async function startServer() {
       save();
       res.json({ content, conversationId: convId });
     } catch (e: any) {
-      res.status(500).json({ error: 'AI call failed: ' + e.message });
+      console.error('[chat error]', e?.message, e?.status, e?.error);
+      res.status(500).json({ error: e?.message || 'AI call failed', details: e?.error || e?.status });
     }
   });
 
@@ -272,7 +273,8 @@ async function startServer() {
       const content = await callAI(provider, model, systemPrompt, messages);
       res.json({ reply: content });
     } catch (e: any) {
-      res.status(500).json({ error: 'AI call failed: ' + e.message });
+      console.error('[chat error]', e?.message, e?.status, e?.error);
+      res.status(500).json({ error: e?.message || 'AI call failed', details: e?.error || e?.status });
     }
   });
 
@@ -301,6 +303,7 @@ async function startServer() {
 }
 
 startServer().catch(console.error);
+
 
 
 
