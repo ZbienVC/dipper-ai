@@ -8,39 +8,29 @@ import {
 } from 'lucide-react'
 
 const MOCK_AGENTS: Record<string, {
-  id: string, name: string, emoji: string, avatarColor: string,
-  status: string, template: string, model: string,
-  messages: number, uptime: string, accuracy: string,
-  channels: string[], bio: string, tone: string, commStyle: string,
+  id: string, name: string, status: string, template: string, model: string,
+  messages: number, uptime: string, accuracy: string, channels: string[],
+  bio: string, tone: string, commStyle: string,
 }> = {
   '1': {
-    id: '1', name: 'SupportBot Pro', emoji: '🎧',
-    avatarColor: 'from-blue-500 to-indigo-600',
-    status: 'active', template: 'Customer Support Bot',
-    model: 'Claude 3.5 Sonnet', messages: 412,
-    uptime: '99.8%', accuracy: '94%',
+    id: '1', name: 'SupportBot Pro', status: 'active', template: 'Customer Support Bot',
+    model: 'Claude 3.5 Haiku', messages: 412, uptime: '99.8%', accuracy: '94%',
     channels: ['SMS', 'Telegram'],
-    bio: 'I handle customer support inquiries with speed and precision. I know our product inside-out and always escalate when needed.',
+    bio: 'I handle customer support inquiries with speed and precision.',
     tone: 'Friendly', commStyle: 'Professional',
   },
   '2': {
-    id: '2', name: 'Sales Ninja', emoji: '💼',
-    avatarColor: 'from-violet-500 to-purple-600',
-    status: 'active', template: 'Sales Follow-up Agent',
-    model: 'GPT-4o', messages: 289,
-    uptime: '99.5%', accuracy: '91%',
+    id: '2', name: 'Sales Ninja', status: 'active', template: 'Sales Follow-up Agent',
+    model: 'GPT-4o', messages: 289, uptime: '99.5%', accuracy: '91%',
     channels: ['SMS', 'X'],
-    bio: 'I turn cold leads warm and warm leads hot. My goal is to move every prospect forward in the pipeline.',
+    bio: 'I turn cold leads warm and warm leads hot.',
     tone: 'Assertive', commStyle: 'Casual & Friendly',
   },
   '3': {
-    id: '3', name: 'Community Max', emoji: '🌐',
-    avatarColor: 'from-teal-400 to-emerald-500',
-    status: 'paused', template: 'Telegram Community Manager',
-    model: 'Gemini 1.5 Pro', messages: 146,
-    uptime: '97.2%', accuracy: '89%',
+    id: '3', name: 'Community Max', status: 'paused', template: 'Telegram Community Manager',
+    model: 'Gemini 1.5 Pro', messages: 146, uptime: '97.2%', accuracy: '89%',
     channels: ['Telegram', 'Discord'],
-    bio: 'I keep communities engaged, moderated, and growing. I post updates, answer questions, and welcome new members.',
+    bio: 'I keep communities engaged, moderated, and growing.',
     tone: 'Playful', commStyle: 'Casual & Friendly',
   },
 }
@@ -59,164 +49,154 @@ const TABS = [
 interface ChatMsg { role: 'user' | 'agent'; text: string; ts: string }
 interface Command { trigger: string; response: string }
 
-const MOCK_RESPONSES = [
-  "I understand your concern! Let me look into that for you right away. 🔍",
-  "Great question! Based on what I know, here's the best answer I can give you...",
-  "I've got you covered! Our team usually handles this within 24 hours.",
-  "That's something I can help with! Could you give me a bit more context?",
-  "Absolutely! Here's what I recommend based on your situation...",
-  "Thanks for reaching out! I'll make sure to get you the right information.",
-  "I see what you're asking — let me pull up the relevant details for you.",
-]
-
 function getTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
+
+const inputClass = "w-full px-4 py-2.5 rounded-xl bg-white/5 border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white placeholder-slate-600 text-sm transition-all"
 
 export default function AgentDetail() {
   const { id = '1' } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const agent = MOCK_AGENTS[id] || MOCK_AGENTS['1']
+
+  const [agentData, setAgentData] = useState<any>(null)
+  const agent = agentData || MOCK_AGENTS[id] || MOCK_AGENTS['1']
+
+  useEffect(() => {
+    const token = (() => { try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null } })()
+    if (!token) return
+    fetch(`/api/agents/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setAgentData({ id: d.id, name: d.name, status: d.is_active ? 'active' : 'paused', template: d.description, model: d.model, messages: d.total_messages, uptime: 'N/A', accuracy: 'N/A', channels: [], bio: d.system_prompt, tone: 'Friendly', commStyle: 'Professional' }))
+      .catch(() => {})
+  }, [id])
 
   const initialTab = searchParams.get('tab') || 'overview'
   const [activeTab, setActiveTab] = useState(initialTab)
-  const [editBio, setEditBio] = useState(agent.bio)
-  const [editTone, setEditTone] = useState(agent.tone)
-  const [editCommStyle, setEditCommStyle] = useState(agent.commStyle)
+  const [editBio, setEditBio] = useState('')
+  const [editTone, setEditTone] = useState('')
+  const [editCommStyle, setEditCommStyle] = useState('')
   const [saved, setSaved] = useState(false)
-
-  // Personality & model state
   const [selectedModel, setSelectedModel] = useState('gemini-1.5-flash')
   const [editAdjectives, setEditAdjectives] = useState('Helpful, Professional, Concise')
-  const [editTopics, setEditTopics] = useState(agent.template)
+  const [editTopics, setEditTopics] = useState('')
   const [editForbiddenWords, setEditForbiddenWords] = useState('')
-
-  // Chat state
-  const [messages, setMessages] = useState<ChatMsg[]>([
-    { role: 'agent', text: `Hey! I'm ${agent.name}. How can I help you today? 👋`, ts: '10:30 AM' },
-    { role: 'user', text: 'Can you tell me about your capabilities?', ts: '10:31 AM' },
-    { role: 'agent', text: `Great question! I'm specialized in ${agent.template}. I can handle inquiries, provide information, and escalate complex issues to the right team. What would you like help with?`, ts: '10:31 AM' },
-  ])
+  const [messages, setMessages] = useState<ChatMsg[]>([])
   const [inputText, setInputText] = useState('')
   const [thinking, setThinking] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
-
-  // Knowledge state
   const [urlInput, setUrlInput] = useState('')
   const [knowledgeDragOver, setKnowledgeDragOver] = useState(false)
-
-  // Commands state
   const [commands, setCommands] = useState<Command[]>([
-    { trigger: '/help', response: 'Lists all available features and commands for this agent.' },
-    { trigger: '/pricing', response: 'Shows current pricing plans and feature comparisons.' },
+    { trigger: '/help', response: 'Lists all available features and commands.' },
+    { trigger: '/pricing', response: 'Shows current pricing plans.' },
   ])
   const [showAddCommand, setShowAddCommand] = useState(false)
   const [newTrigger, setNewTrigger] = useState('')
   const [newResponse, setNewResponse] = useState('')
-
-  // Integrations state
-  const [integrationToggles, setIntegrationToggles] = useState<Record<string, boolean>>({
-    sms: agent.channels.includes('SMS'),
-    telegram: agent.channels.includes('Telegram'),
-    twitter: agent.channels.includes('X'),
-    discord: agent.channels.includes('Discord'),
-  })
+  const [integrationToggles, setIntegrationToggles] = useState<Record<string, boolean>>({ sms: false, telegram: true, twitter: false, discord: false })
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, thinking])
+    if (agent) {
+      setEditBio(agent.bio || '')
+      setEditTone(agent.tone || 'Friendly')
+      setEditCommStyle(agent.commStyle || 'Professional')
+      setMessages([{ role: 'agent', text: `Hey! I'm ${agent.name}. How can I help you today?`, ts: getTime() }])
+      setEditTopics(agent.template || '')
+    }
+  }, [agent.name])
 
-  // Sync tab from searchParams
-  useEffect(() => {
-    const tab = searchParams.get('tab')
-    if (tab) setActiveTab(tab)
-  }, [searchParams])
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, thinking])
+  useEffect(() => { const tab = searchParams.get('tab'); if (tab) setActiveTab(tab) }, [searchParams])
 
   const sendMessage = async () => {
     if (!inputText.trim() || thinking) return
     const userMsg: ChatMsg = { role: 'user', text: inputText.trim(), ts: getTime() }
     const currentInput = inputText.trim()
+
+    // Check if we have a real agent with auth token
+    const token = (() => { try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null } })()
+
     setMessages(prev => [...prev, userMsg])
     setInputText('')
     setThinking(true)
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agentId: id,
-          message: currentInput,
-          conversationHistory: messages,
-          agentName: agent.name,
-          personality: {
-            bio: editBio,
-            adjectives: editAdjectives.split(',').map(s => s.trim()).filter(Boolean),
-            communicationStyle: editCommStyle,
-            topics: editTopics.split(',').map(s => s.trim()).filter(Boolean),
-            forbiddenWords: editForbiddenWords || undefined,
-          },
-          model: selectedModel,
-        }),
-      })
-      const data = await response.json()
-      if (!response.ok || data.error) {
-        setMessages(prev => [...prev, { role: 'agent', text: 'Sorry, I had trouble responding. Try again.', ts: getTime() }])
+      let reply: string
+      if (token && agentData) {
+        const res = await fetch(`/api/agents/${id}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ message: currentInput }),
+        })
+        const data = await res.json()
+        reply = data.content || data.error || 'Something went wrong.'
       } else {
-        setMessages(prev => [...prev, { role: 'agent', text: data.reply, ts: getTime() }])
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentId: id, message: currentInput,
+            conversationHistory: messages, agentName: agent.name,
+            personality: { bio: editBio, adjectives: editAdjectives.split(',').map(s => s.trim()).filter(Boolean), communicationStyle: editCommStyle, topics: editTopics.split(',').map(s => s.trim()).filter(Boolean), forbiddenWords: editForbiddenWords || undefined },
+            model: selectedModel,
+          }),
+        })
+        const data = await res.json()
+        reply = data.reply || data.error || 'Something went wrong.'
       }
+      setMessages(prev => [...prev, { role: 'agent', text: reply, ts: getTime() }])
     } catch {
       setMessages(prev => [...prev, { role: 'agent', text: 'Sorry, I had trouble responding. Try again.', ts: getTime() }])
     }
     setThinking(false)
   }
 
-  const handleSavePersonality = () => {
+  const handleSavePersonality = async () => {
+    const token = (() => { try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null } })()
+    if (token && agentData) {
+      await fetch(`/api/agents/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ systemPrompt: editBio }),
+      }).catch(() => {})
+    }
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
 
-  const handleAddCommand = () => {
-    if (!newTrigger || !newResponse) return
-    setCommands(prev => [...prev, { trigger: newTrigger, response: newResponse }])
-    setNewTrigger('')
-    setNewResponse('')
-    setShowAddCommand(false)
-  }
-
   const renderOverview = () => (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: 'Total Messages', value: agent.messages.toLocaleString(), color: 'text-blue-600', bg: 'bg-blue-50' },
-          { label: 'Uptime', value: agent.uptime, color: 'text-green-600', bg: 'bg-green-50' },
-          { label: 'Accuracy', value: agent.accuracy, color: 'text-violet-600', bg: 'bg-violet-50' },
-          { label: 'Channels', value: String(agent.channels.length), color: 'text-teal-600', bg: 'bg-teal-50' },
+          { label: 'Total Messages', value: (agent.messages || 0).toLocaleString(), color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20' },
+          { label: 'Uptime', value: agent.uptime || 'N/A', color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
+          { label: 'Accuracy', value: agent.accuracy || 'N/A', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
+          { label: 'Channels', value: String(agent.channels?.length || 0), color: 'text-teal-400', bg: 'bg-teal-500/10', border: 'border-teal-500/20' },
         ].map(s => (
-          <div key={s.label} className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-            <div className={`w-10 h-10 rounded-xl ${s.bg} flex items-center justify-center mb-3`}>
-              <Activity size={18} className={s.color} />
+          <div key={s.label} className={`bg-[#111118] rounded-xl p-4 border ${s.border}`}>
+            <div className={`w-9 h-9 rounded-lg ${s.bg} flex items-center justify-center mb-3`}>
+              <Activity size={16} className={s.color} />
             </div>
-            <p className={`text-2xl font-extrabold ${s.color}`}>{s.value}</p>
-            <p className="text-xs text-gray-500 mt-1">{s.label}</p>
+            <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{s.label}</p>
           </div>
         ))}
       </div>
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-        <h3 className="font-bold text-gray-900 mb-4">Recent Activity</h3>
+      <div className="bg-[#111118] rounded-xl border border-[#1e1e2e] p-5">
+        <h3 className="font-semibold text-white mb-3 text-sm">Recent Activity</h3>
         <div className="space-y-3">
           {[
-            { text: 'Handled 12 customer inquiries', time: '2 min ago', dot: 'bg-blue-500' },
-            { text: 'Auto-escalated 1 ticket to human support', time: '18 min ago', dot: 'bg-orange-400' },
-            { text: 'Sent daily summary report', time: '1 hr ago', dot: 'bg-violet-500' },
+            { text: 'Handled 12 customer inquiries', time: '2 min ago', dot: 'bg-violet-500' },
+            { text: 'Auto-escalated 1 ticket', time: '18 min ago', dot: 'bg-amber-500' },
+            { text: 'Sent daily summary report', time: '1 hr ago', dot: 'bg-blue-500' },
             { text: 'Processed 47 messages via Telegram', time: '2 hrs ago', dot: 'bg-teal-500' },
-            { text: 'Updated knowledge base', time: '5 hrs ago', dot: 'bg-green-500' },
           ].map((item, i) => (
             <div key={i} className="flex items-start gap-3">
-              <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${item.dot}`} />
+              <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${item.dot}`} />
               <div>
-                <p className="text-sm text-gray-700">{item.text}</p>
-                <p className="text-xs text-gray-400">{item.time}</p>
+                <p className="text-sm text-slate-300">{item.text}</p>
+                <p className="text-xs text-slate-600">{item.time}</p>
               </div>
             </div>
           ))}
@@ -226,79 +206,72 @@ export default function AgentDetail() {
   )
 
   const renderChat = () => (
-    <div className="flex flex-col h-[600px] bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3">
-        <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${agent.avatarColor} flex items-center justify-center text-white font-bold text-sm`}>
-          {agent.emoji}
+    <div className="flex flex-col h-[580px] bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-[#1e1e2e] flex items-center gap-3">
+        <div className="w-8 h-8 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
+          <Bot size={14} className="text-violet-400" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-bold text-gray-900 text-sm">{agent.name}</p>
-          <p className="text-xs text-green-500 font-medium flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" /> Online
+          <p className="font-semibold text-white text-sm">{agent.name}</p>
+          <p className="text-xs text-green-400 font-medium flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" /> Online
           </p>
         </div>
-        <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-violet-50 text-violet-600 flex-shrink-0">
-          {selectedModel === 'gemini-1.5-flash' ? 'Gemini 1.5 Flash' :
-           selectedModel === 'gemini-1.5-pro' ? 'Gemini 1.5 Pro' :
-           selectedModel === 'gemini-2.0-flash' ? 'Gemini 2.0 Flash' :
-           selectedModel}
-        </span>
+        <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
+          className="text-xs bg-white/5 border border-[#1e1e2e] text-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-violet-500/50">
+          <option value="gemini-1.5-flash">Gemini Flash</option>
+          <option value="gemini-1.5-pro">Gemini Pro</option>
+          <option value="claude-3-5-haiku-20241022">Claude Haiku</option>
+          <option value="gpt-4o-mini">GPT-4o Mini</option>
+        </select>
       </div>
-      <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-slate-50">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#0a0a0f]">
         {messages.map((msg, i) => (
           <div key={i} className={`flex items-end gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             {msg.role === 'agent' && (
-              <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${agent.avatarColor} flex items-center justify-center flex-shrink-0 mb-1`}>
-                <Bot size={14} className="text-white" />
+              <div className="w-7 h-7 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0 mb-1">
+                <Bot size={12} className="text-violet-400" />
               </div>
             )}
-            <div className={`max-w-sm ${msg.role === 'user' ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
-              <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                msg.role === 'user' ? 'text-white rounded-br-sm' : 'bg-white text-gray-800 border border-gray-100 rounded-bl-sm shadow-sm'
-              }`} style={msg.role === 'user' ? { background: 'linear-gradient(135deg, #2563EB, #7C3AED)' } : {}}>
+            <div className={`max-w-sm flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div className={`px-4 py-2.5 rounded-xl text-sm leading-relaxed ${
+                msg.role === 'user' ? 'text-white rounded-br-sm bg-violet-600' : 'bg-[#16161f] text-slate-200 border border-[#1e1e2e] rounded-bl-sm'
+              }`}>
                 {msg.text}
               </div>
-              <span className="text-xs text-gray-400 px-1">{msg.ts}</span>
+              <span className="text-xs text-slate-600 px-1">{msg.ts}</span>
             </div>
             {msg.role === 'user' && (
-              <div className="w-8 h-8 rounded-xl bg-gray-200 flex items-center justify-center flex-shrink-0 mb-1">
-                <User size={14} className="text-gray-500" />
+              <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0 mb-1">
+                <User size={12} className="text-slate-400" />
               </div>
             )}
           </div>
         ))}
         {thinking && (
           <div className="flex items-end gap-2 justify-start">
-            <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${agent.avatarColor} flex items-center justify-center flex-shrink-0`}>
-              <Bot size={14} className="text-white" />
+            <div className="w-7 h-7 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0">
+              <Bot size={12} className="text-violet-400" />
             </div>
-            <div className="bg-white border border-gray-100 rounded-2xl rounded-bl-sm px-5 py-3 shadow-sm">
-              <div className="flex gap-1.5 items-center">
-                <span className="w-2 h-2 rounded-full bg-gray-300 animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 rounded-full bg-gray-300 animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 rounded-full bg-gray-300 animate-bounce" style={{ animationDelay: '300ms' }} />
+            <div className="bg-[#16161f] border border-[#1e1e2e] rounded-xl rounded-bl-sm px-4 py-2.5">
+              <div className="flex gap-1 items-center">
+                {[0, 150, 300].map(d => (
+                  <span key={d} className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce" style={{ animationDelay: `${d}ms` }} />
+                ))}
               </div>
             </div>
           </div>
         )}
         <div ref={chatEndRef} />
       </div>
-      <div className="px-4 py-4 border-t border-gray-100 bg-white">
-        <div className="flex gap-3 items-center">
-          <input
-            value={inputText}
-            onChange={e => setInputText(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && sendMessage()}
-            placeholder={`Message ${agent.name}...`}
-            disabled={thinking}
-            className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:bg-gray-50"
-          />
-          <button
-            onClick={sendMessage}
-            disabled={!inputText.trim() || thinking}
-            className="gradient-btn w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Send size={16} />
+      <div className="px-4 py-3 border-t border-[#1e1e2e] bg-[#111118]">
+        <div className="flex gap-2 items-center">
+          <input value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()}
+            placeholder={`Message ${agent.name}...`} disabled={thinking}
+            className="flex-1 px-4 py-2 rounded-xl bg-white/5 border border-[#1e1e2e] text-sm focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-slate-200 placeholder-slate-600 transition-all disabled:opacity-50" />
+          <button onClick={sendMessage} disabled={!inputText.trim() || thinking}
+            className="gradient-btn w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-40">
+            <Send size={14} />
           </button>
         </div>
       </div>
@@ -306,213 +279,133 @@ export default function AgentDetail() {
   )
 
   const renderPersonality = () => (
-    <div className="space-y-6 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+    <div className="space-y-5 bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-2">Bio</label>
-        <textarea
-          value={editBio}
-          onChange={e => setEditBio(e.target.value)}
-          rows={4}
-          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 resize-none transition-all"
-        />
+        <label className="block text-sm font-semibold text-slate-300 mb-2">System Prompt / Bio</label>
+        <textarea value={editBio} onChange={e => setEditBio(e.target.value)} rows={4}
+          className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm resize-none" />
       </div>
-      <div className="grid grid-cols-2 gap-5">
+      <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Tone</label>
+          <label className="block text-sm font-semibold text-slate-300 mb-2">Tone</label>
           <select value={editTone} onChange={e => setEditTone(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900">
+            className="w-full px-4 py-2.5 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm">
             {['Friendly', 'Professional', 'Assertive', 'Playful', 'Empathetic', 'Witty'].map(t => <option key={t}>{t}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Communication Style</label>
+          <label className="block text-sm font-semibold text-slate-300 mb-2">Communication Style</label>
           <select value={editCommStyle} onChange={e => setEditCommStyle(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900">
+            className="w-full px-4 py-2.5 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm">
             {['Professional', 'Casual & Friendly', 'Formal', 'Witty & Humorous', 'Empathetic', 'Direct & Concise'].map(s => <option key={s}>{s}</option>)}
           </select>
         </div>
       </div>
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-2">Personality Traits <span className="text-gray-400 font-normal">(comma-separated)</span></label>
-        <input
-          type="text"
-          value={editAdjectives}
-          onChange={e => setEditAdjectives(e.target.value)}
-          placeholder="e.g. Helpful, Professional, Concise"
-          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 transition-all"
-        />
+        <label className="block text-sm font-semibold text-slate-300 mb-2">Personality Traits <span className="text-slate-600 font-normal">(comma-separated)</span></label>
+        <input type="text" value={editAdjectives} onChange={e => setEditAdjectives(e.target.value)} className={inputClass} />
       </div>
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-2">Topics / Specializations <span className="text-gray-400 font-normal">(comma-separated)</span></label>
-        <input
-          type="text"
-          value={editTopics}
-          onChange={e => setEditTopics(e.target.value)}
-          placeholder="e.g. Customer Support, Product FAQ, Billing"
-          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 transition-all"
-        />
-      </div>
-      <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-2">Forbidden Words <span className="text-gray-400 font-normal">(optional)</span></label>
-        <input
-          type="text"
-          value={editForbiddenWords}
-          onChange={e => setEditForbiddenWords(e.target.value)}
-          placeholder="e.g. competitor names, sensitive terms"
-          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 transition-all"
-        />
-      </div>
-
-      {/* Model Selector */}
-      <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-2">AI Model</label>
-        <select
-          value={selectedModel}
-          onChange={e => setSelectedModel(e.target.value)}
-          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-        >
-          <optgroup label="Google Gemini ✅ Active">
-            <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast &amp; Cheap)</option>
-            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Smart)</option>
-            <option value="gemini-2.0-flash">Gemini 2.0 Flash (Latest)</option>
+        <label className="block text-sm font-semibold text-slate-300 mb-2">AI Model</label>
+        <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
+          className="w-full px-4 py-2.5 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm">
+          <optgroup label="Google Gemini">
+            <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast)</option>
+            <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
           </optgroup>
-          <optgroup label="OpenAI (key required)">
+          <optgroup label="Anthropic">
+            <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+          </optgroup>
+          <optgroup label="OpenAI">
             <option value="gpt-4o">GPT-4o</option>
             <option value="gpt-4o-mini">GPT-4o Mini</option>
           </optgroup>
-          <optgroup label="Anthropic (key required)">
-            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-            <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
-          </optgroup>
         </select>
-        <p className="text-xs text-gray-400 mt-1.5">
-          {selectedModel.includes('gemini') ? '✅ Gemini is active and ready to use.' :
-           selectedModel.startsWith('gpt') ? '⚠️ OpenAI key not configured. Chat will return an error.' :
-           selectedModel.startsWith('claude') ? '⚠️ Anthropic key not configured. Chat will return an error.' : ''}
-        </p>
       </div>
-
       <button onClick={handleSavePersonality}
-        className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all ${saved ? 'bg-green-500 text-white' : 'gradient-btn'}`}>
-        {saved ? <><Check size={16} /> Saved!</> : <><Save size={16} /> Save Changes</>}
+        className={`flex items-center gap-2 px-5 py-2 rounded-xl font-semibold text-sm transition-all ${saved ? 'bg-green-500 text-white' : 'gradient-btn'}`}>
+        {saved ? <><Check size={14} /> Saved!</> : <><Save size={14} /> Save Changes</>}
       </button>
     </div>
   )
 
   const renderKnowledge = () => (
-    <div className="space-y-5">
-      {/* Upload Area */}
-      <div
-        onDragOver={e => { e.preventDefault(); setKnowledgeDragOver(true) }}
-        onDragLeave={() => setKnowledgeDragOver(false)}
+    <div className="space-y-4">
+      <div onDragOver={e => { e.preventDefault(); setKnowledgeDragOver(true) }} onDragLeave={() => setKnowledgeDragOver(false)}
         onDrop={e => { e.preventDefault(); setKnowledgeDragOver(false) }}
-        className={`bg-white rounded-2xl border-2 border-dashed p-10 text-center transition-all ${knowledgeDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-200'}`}
-      >
-        <Upload size={36} className={`mx-auto mb-3 ${knowledgeDragOver ? 'text-blue-500' : 'text-gray-300'}`} />
-        <p className="font-semibold text-gray-700 mb-1">Drag & drop files here</p>
-        <p className="text-sm text-gray-400 mb-4">PDF, DOCX, TXT, CSV — up to 50MB</p>
-        <button className="gradient-btn px-5 py-2.5 rounded-xl font-semibold text-sm flex items-center gap-2 mx-auto">
-          <Upload size={15} /> Browse Files
+        className={`bg-[#111118] border-2 border-dashed rounded-xl p-10 text-center transition-all ${knowledgeDragOver ? 'border-violet-500 bg-violet-500/10' : 'border-[#1e1e2e]'}`}>
+        <Upload size={28} className={`mx-auto mb-2 ${knowledgeDragOver ? 'text-violet-400' : 'text-slate-600'}`} />
+        <p className="font-semibold text-slate-300 text-sm mb-1">Drag & drop files here</p>
+        <p className="text-xs text-slate-600 mb-3">PDF, DOCX, TXT, CSV</p>
+        <button className="gradient-btn px-4 py-2 rounded-xl font-semibold text-xs flex items-center gap-1.5 mx-auto">
+          <Upload size={13} /> Browse Files
         </button>
       </div>
-
-      {/* URL Input */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-        <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2"><Link2 size={16} /> Add URL</h3>
+      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4">
+        <h3 className="font-semibold text-white mb-3 text-sm flex items-center gap-2"><Link2 size={14} /> Add URL</h3>
         <div className="flex gap-3">
-          <input
-            type="url"
-            value={urlInput}
-            onChange={e => setUrlInput(e.target.value)}
-            placeholder="https://your-website.com/docs"
-            className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-          />
-          <button className="gradient-btn px-5 py-2.5 rounded-xl font-semibold text-sm">
-            Scrape
-          </button>
+          <input type="url" value={urlInput} onChange={e => setUrlInput(e.target.value)} placeholder="https://your-website.com/docs" className={inputClass} />
+          <button className="gradient-btn px-4 py-2 rounded-xl font-semibold text-xs flex-shrink-0">Scrape</button>
         </div>
       </div>
-
-      {/* Uploaded Files */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-        <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2"><FileText size={16} /> Knowledge Sources</h3>
-        <div className="flex items-center justify-between p-3 bg-blue-50 rounded-xl">
+      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4">
+        <h3 className="font-semibold text-white mb-3 text-sm flex items-center gap-2"><FileText size={14} /> Knowledge Sources</h3>
+        <div className="flex items-center justify-between p-3 bg-violet-500/10 border border-violet-500/20 rounded-xl">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center text-red-600 font-bold text-xs">PDF</div>
+            <div className="w-9 h-9 rounded-lg bg-red-500/20 border border-red-500/20 flex items-center justify-center text-red-400 font-bold text-xs">PDF</div>
             <div>
-              <p className="font-semibold text-gray-900 text-sm">Product FAQ.pdf</p>
-              <p className="text-xs text-gray-500">12 pages · 248 KB · Added 2 days ago</p>
+              <p className="font-semibold text-white text-sm">Product FAQ.pdf</p>
+              <p className="text-xs text-slate-500">12 pages · 248 KB</p>
             </div>
           </div>
-          <button className="text-gray-400 hover:text-red-500 transition-colors p-1.5">
-            <X size={15} />
-          </button>
+          <button className="text-slate-600 hover:text-red-400 transition-colors p-1.5"><X size={14} /></button>
         </div>
       </div>
     </div>
   )
 
   const renderCommands = () => (
-    <div className="space-y-4">
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between p-5 border-b border-gray-100">
-          <h3 className="font-bold text-gray-900 flex items-center gap-2"><Terminal size={16} /> Custom Commands</h3>
-          <button
-            onClick={() => setShowAddCommand(v => !v)}
-            className="gradient-btn flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold"
-          >
-            <Plus size={14} /> Add Command
+    <div className="space-y-3">
+      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
+        <div className="flex items-center justify-between p-4 border-b border-[#1e1e2e]">
+          <h3 className="font-semibold text-white text-sm flex items-center gap-2"><Terminal size={14} /> Custom Commands</h3>
+          <button onClick={() => setShowAddCommand(v => !v)}
+            className="gradient-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold">
+            <Plus size={12} /> Add Command
           </button>
         </div>
-
         {showAddCommand && (
-          <div className="p-5 bg-blue-50 border-b border-blue-100 space-y-3">
+          <div className="p-4 bg-violet-500/5 border-b border-[#1e1e2e] space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Trigger</label>
-                <input
-                  type="text"
-                  value={newTrigger}
-                  onChange={e => setNewTrigger(e.target.value)}
-                  placeholder="/command"
-                  className="w-full px-3 py-2 rounded-lg border border-blue-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                />
+                <label className="block text-xs font-semibold text-slate-400 mb-1">Trigger</label>
+                <input type="text" value={newTrigger} onChange={e => setNewTrigger(e.target.value)} placeholder="/command"
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-[#1e1e2e] text-sm focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white font-mono" />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Response</label>
-                <input
-                  type="text"
-                  value={newResponse}
-                  onChange={e => setNewResponse(e.target.value)}
-                  placeholder="What the agent replies..."
-                  className="w-full px-3 py-2 rounded-lg border border-blue-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                />
+                <label className="block text-xs font-semibold text-slate-400 mb-1">Response</label>
+                <input type="text" value={newResponse} onChange={e => setNewResponse(e.target.value)} placeholder="Agent reply..."
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-[#1e1e2e] text-sm focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white" />
               </div>
             </div>
             <div className="flex gap-2">
-              <button onClick={handleAddCommand} className="gradient-btn px-4 py-2 rounded-lg text-sm font-semibold">
-                Save Command
-              </button>
-              <button onClick={() => setShowAddCommand(false)} className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50">
-                Cancel
-              </button>
+              <button onClick={() => { if (newTrigger && newResponse) { setCommands(prev => [...prev, { trigger: newTrigger, response: newResponse }]); setNewTrigger(''); setNewResponse(''); setShowAddCommand(false) } }}
+                className="gradient-btn px-3 py-1.5 rounded-lg text-xs font-semibold">Save</button>
+              <button onClick={() => setShowAddCommand(false)} className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#1e1e2e] text-slate-400 hover:bg-white/5">Cancel</button>
             </div>
           </div>
         )}
-
-        <div className="divide-y divide-gray-50">
+        <div className="divide-y divide-[#1e1e2e]">
           {commands.map((cmd, i) => (
-            <div key={i} className="flex items-start justify-between p-5 hover:bg-gray-50 transition-colors">
-              <div className="flex items-start gap-3">
-                <span className="font-mono text-sm font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg">{cmd.trigger}</span>
-                <span className="text-sm text-gray-600 mt-1">→ {cmd.response}</span>
+            <div key={i} className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
+              <div className="flex items-center gap-3">
+                <span className="font-mono text-xs font-bold text-violet-400 bg-violet-500/10 border border-violet-500/20 px-2 py-1 rounded-lg">{cmd.trigger}</span>
+                <span className="text-sm text-slate-500">→ {cmd.response}</span>
               </div>
-              <button
-                onClick={() => setCommands(prev => prev.filter((_, j) => j !== i))}
-                className="text-gray-400 hover:text-red-500 transition-colors p-1 flex-shrink-0"
-              >
-                <X size={15} />
-              </button>
+              <button onClick={() => setCommands(prev => prev.filter((_, j) => j !== i))}
+                className="text-slate-600 hover:text-red-400 transition-colors p-1"><X size={13} /></button>
             </div>
           ))}
         </div>
@@ -521,32 +414,27 @@ export default function AgentDetail() {
   )
 
   const renderAgentIntegrations = () => (
-    <div className="space-y-4">
-      <p className="text-sm text-gray-500">Enable or disable integrations for this specific agent.</p>
+    <div className="space-y-3">
+      <p className="text-sm text-slate-500">Enable or disable integrations for this agent.</p>
       {[
-        { id: 'sms', name: 'SMS / Twilio', icon: '📱', desc: 'Send and receive SMS messages', color: 'bg-red-50' },
-        { id: 'telegram', name: 'Telegram', icon: '✈️', desc: 'Deploy as a Telegram bot', color: 'bg-blue-50' },
-        { id: 'twitter', name: 'X / Twitter', icon: '𝕏', desc: 'Auto-respond to mentions and DMs', color: 'bg-gray-100' },
-        { id: 'discord', name: 'Discord', icon: '🎮', desc: 'Engage your Discord community', color: 'bg-indigo-50' },
+        { id: 'sms', name: 'SMS / Twilio', desc: 'Send and receive SMS messages' },
+        { id: 'telegram', name: 'Telegram', desc: 'Deploy as a Telegram bot' },
+        { id: 'twitter', name: 'X / Twitter', desc: 'Auto-respond to mentions and DMs' },
+        { id: 'discord', name: 'Discord', desc: 'Engage your Discord community' },
       ].map(intg => (
-        <div key={intg.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-xl ${intg.color} flex items-center justify-center text-2xl`}>
-              {intg.icon}
+        <div key={intg.id} className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/5 border border-[#1e1e2e] flex items-center justify-center">
+              <Plug size={16} className={integrationToggles[intg.id] ? 'text-violet-400' : 'text-slate-600'} />
             </div>
             <div>
-              <p className="font-bold text-gray-900 text-sm">{intg.name}</p>
-              <p className="text-xs text-gray-500">{intg.desc}</p>
+              <p className="font-semibold text-white text-sm">{intg.name}</p>
+              <p className="text-xs text-slate-500">{intg.desc}</p>
             </div>
           </div>
-          <button
-            onClick={() => setIntegrationToggles(prev => ({ ...prev, [intg.id]: !prev[intg.id] }))}
-            className={`transition-colors ${integrationToggles[intg.id] ? 'text-blue-600' : 'text-gray-300'}`}
-          >
-            {integrationToggles[intg.id]
-              ? <ToggleRight size={36} />
-              : <ToggleLeft size={36} />
-            }
+          <button onClick={() => setIntegrationToggles(prev => ({ ...prev, [intg.id]: !prev[intg.id] }))}
+            className={`transition-colors ${integrationToggles[intg.id] ? 'text-violet-400' : 'text-slate-600'}`}>
+            {integrationToggles[intg.id] ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
           </button>
         </div>
       ))}
@@ -554,90 +442,73 @@ export default function AgentDetail() {
   )
 
   const renderEmptyTab = (tab: string) => (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-16 text-center">
-      <div className="text-5xl mb-4">
-        {tab === 'analytics' ? '📊' : '⚙️'}
+    <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-16 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto mb-4">
+        {tab === 'analytics' ? <BarChart2 size={24} className="text-violet-400" /> : <Settings size={24} className="text-violet-400" />}
       </div>
-      <h3 className="text-xl font-bold text-gray-900 mb-2">
-        {tab === 'analytics' ? 'Analytics Coming Soon' : 'Settings'}
-      </h3>
-      <p className="text-gray-500 text-sm max-w-xs mx-auto mb-6">
-        {tab === 'analytics' ? 'Detailed analytics and reporting will be available here.' : 'Configure advanced agent settings here.'}
-      </p>
-      <button onClick={() => navigate('/dashboard/agents/new')} className="gradient-btn px-6 py-2.5 rounded-xl font-semibold text-sm">
-        Configure in Wizard
-      </button>
+      <h3 className="text-base font-bold text-white mb-2">{tab === 'analytics' ? 'Analytics Coming Soon' : 'Settings'}</h3>
+      <p className="text-slate-500 text-sm max-w-xs mx-auto">{tab === 'analytics' ? 'Detailed analytics will be available here soon.' : 'Advanced agent settings will appear here.'}</p>
     </div>
   )
 
   const tabContent: Record<string, () => JSX.Element> = {
-    overview: renderOverview,
-    chat: renderChat,
-    personality: renderPersonality,
-    knowledge: renderKnowledge,
-    commands: renderCommands,
-    integrations: renderAgentIntegrations,
-    analytics: () => renderEmptyTab('analytics'),
-    settings: () => renderEmptyTab('settings'),
+    overview: renderOverview, chat: renderChat, personality: renderPersonality, knowledge: renderKnowledge,
+    commands: renderCommands, integrations: renderAgentIntegrations,
+    analytics: () => renderEmptyTab('analytics'), settings: () => renderEmptyTab('settings'),
   }
 
   return (
     <DashboardLayout>
       {/* Agent Header */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6">
-        <div className="flex items-start gap-5 flex-wrap">
-          <div className={`w-20 h-20 rounded-3xl bg-gradient-to-br ${agent.avatarColor} flex items-center justify-center text-4xl flex-shrink-0 shadow-lg`}>
-            {agent.emoji}
+      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-5">
+        <div className="flex items-start gap-4 flex-wrap">
+          <div className="w-14 h-14 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0">
+            <Bot size={24} className="text-violet-400" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 flex-wrap mb-1">
-              <h1 className="text-2xl font-extrabold text-gray-900">{agent.name}</h1>
-              <span className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full ${
-                agent.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'
+              <h1 className="text-xl font-bold text-white">{agent.name}</h1>
+              <span className={`flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border ${
+                agent.status === 'active' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
               }`}>
-                <Circle size={6} className={agent.status === 'active' ? 'fill-green-500 text-green-500' : 'fill-gray-400 text-gray-400'} />
+                <Circle size={5} className={agent.status === 'active' ? 'fill-green-400' : 'fill-slate-400'} />
                 {agent.status === 'active' ? 'Active' : 'Paused'}
               </span>
             </div>
-            <p className="text-gray-500 text-sm mb-3">{agent.template} · {agent.model}</p>
-            <div className="flex items-center gap-6 flex-wrap text-sm text-gray-500">
-              <span className="flex items-center gap-1.5"><MessageSquare size={14} className="text-blue-500" /> {agent.messages} messages</span>
-              <span className="flex items-center gap-1.5"><Activity size={14} className="text-green-500" /> {agent.uptime} uptime</span>
-              <div className="flex gap-2">
-                {agent.channels.map(c => (
-                  <span key={c} className="bg-blue-50 text-blue-600 text-xs font-semibold px-2.5 py-0.5 rounded-full">{c}</span>
-                ))}
-              </div>
+            <p className="text-slate-500 text-sm mb-2">{agent.template || 'Custom Agent'} · {agent.model}</p>
+            <div className="flex items-center gap-4 flex-wrap text-sm text-slate-500">
+              <span className="flex items-center gap-1.5"><MessageSquare size={13} className="text-violet-400" /> {(agent.messages || 0).toLocaleString()} messages</span>
+              <span className="flex items-center gap-1.5"><Activity size={13} className="text-green-400" /> {agent.uptime || 'N/A'} uptime</span>
+              {(agent.channels || []).map((c: string) => (
+                <span key={c} className="bg-violet-500/10 text-violet-400 border border-violet-500/20 text-xs font-semibold px-2 py-0.5 rounded-full">{c}</span>
+              ))}
             </div>
           </div>
-          <div className="flex gap-3 flex-shrink-0">
-            <button onClick={() => setActiveTab('chat')}
-              className="gradient-btn px-5 py-2.5 rounded-xl font-semibold text-sm flex items-center gap-2">
-              <MessageSquare size={15} /> Chat
+          <div className="flex gap-2 flex-shrink-0">
+            <button onClick={() => setActiveTab('chat')} className="gradient-btn px-4 py-2 rounded-xl font-semibold text-sm flex items-center gap-1.5">
+              <MessageSquare size={14} /> Chat
             </button>
             <button onClick={() => setActiveTab('personality')}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-all">
-              <Edit3 size={15} /> Edit
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-[#1e1e2e] text-slate-400 font-semibold text-sm hover:bg-white/5 transition-all">
+              <Edit3 size={14} /> Edit
             </button>
           </div>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 bg-white rounded-xl border border-gray-100 shadow-sm p-1.5 mb-6 overflow-x-auto flex-nowrap">
+      <div className="flex items-center gap-1 bg-[#111118] border border-[#1e1e2e] rounded-xl p-1.5 mb-5 overflow-x-auto flex-nowrap">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button key={id} onClick={() => setActiveTab(id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition-all ${
-              activeTab === id ? 'text-white shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-            }`}
-            style={activeTab === id ? { background: 'linear-gradient(90deg, #2563EB, #7C3AED)' } : {}}>
-            <Icon size={15} />
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+              activeTab === id ? 'gradient-btn' : 'text-slate-500 hover:text-slate-200 hover:bg-white/5'
+            }`}>
+            <Icon size={13} />
             {label}
           </button>
         ))}
       </div>
 
-      {/* Tab content */}
       {(tabContent[activeTab] || tabContent['overview'])()}
     </DashboardLayout>
   )

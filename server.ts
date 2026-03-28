@@ -360,6 +360,12 @@ async function startServer() {
     res.json(db.prepare('SELECT * FROM agents WHERE id = ?').get(req.params.id));
   });
 
+  app.get('/api/agents/:id', auth, (req: any, res) => {
+    const agent = db.prepare('SELECT * FROM agents WHERE id = ? AND user_id = ? AND is_active = 1').get(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    res.json(agent);
+  });
+
   app.delete('/api/agents/:id', auth, (req: any, res) => {
     db.prepare('UPDATE agents SET is_active = 0 WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
     res.json({ success: true });

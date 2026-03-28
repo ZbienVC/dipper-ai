@@ -1,13 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
-import { Plus, Search, MessageSquare, Circle, Edit3 } from 'lucide-react'
+import { Plus, Search, MessageSquare, Circle, Edit3, Bot } from 'lucide-react'
 
-const ALL_AGENTS = [
-  { id: '1', name: 'Support Pro', emoji: '🎧', status: 'active', messages: 412, template: 'Customer Support Bot', channels: ['SMS', 'Telegram'] },
-  { id: '2', name: 'The Closer', emoji: '💼', status: 'active', messages: 289, template: 'Sales Follow-up Agent', channels: ['SMS', 'X'] },
-  { id: '3', name: 'Community Bob', emoji: '🌐', status: 'paused', messages: 146, template: 'Telegram Community Manager', channels: ['Telegram', 'Discord'] },
-]
+interface Agent {
+  id: string
+  name: string
+  status: string
+  messages: number
+  template?: string
+  channels: string[]
+  description?: string
+}
 
 type Filter = 'All' | 'Active' | 'Paused' | 'Draft'
 const FILTERS: Filter[] = ['All', 'Active', 'Paused', 'Draft']
@@ -16,9 +20,40 @@ export default function Agents() {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<Filter>('All')
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [loading, setLoading] = useState(true)
 
-  const filtered = ALL_AGENTS.filter(a => {
-    const matchSearch = a.name.toLowerCase().includes(search.toLowerCase()) || a.template.toLowerCase().includes(search.toLowerCase())
+  useEffect(() => {
+    const token = (() => {
+      try {
+        const u = JSON.parse(localStorage.getItem('dipperai_user') || '{}')
+        return u.token
+      } catch { return null }
+    })()
+    if (!token) {
+      // Fallback mock data
+      setAgents([
+        { id: '1', name: 'Support Pro', status: 'active', messages: 412, template: 'Customer Support Bot', channels: ['SMS', 'Telegram'] },
+        { id: '2', name: 'The Closer', status: 'active', messages: 289, template: 'Sales Follow-up Agent', channels: ['SMS', 'X'] },
+        { id: '3', name: 'Community Bob', status: 'paused', messages: 146, template: 'Telegram Community Manager', channels: ['Telegram', 'Discord'] },
+      ])
+      setLoading(false)
+      return
+    }
+    fetch('/api/agents', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) setAgents(data.map((a: any) => ({
+          id: a.id, name: a.name, status: a.is_active ? 'active' : 'paused',
+          messages: a.total_messages || 0, channels: [], description: a.description,
+        })))
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const filtered = agents.filter(a => {
+    const matchSearch = a.name.toLowerCase().includes(search.toLowerCase()) || (a.template || '').toLowerCase().includes(search.toLowerCase())
     const matchFilter = filter === 'All' || a.status.toLowerCase() === filter.toLowerCase()
     return matchSearch && matchFilter
   })
@@ -27,36 +62,36 @@ export default function Agents() {
     <DashboardLayout title="My Agents">
       <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-gray-900">My Agents</h1>
-          <p className="text-gray-500 mt-1">{ALL_AGENTS.length} agents in your workspace</p>
+          <h1 className="text-xl font-bold text-white">My Agents</h1>
+          <p className="text-slate-500 mt-0.5 text-sm">{agents.length} agents in your workspace</p>
         </div>
         <button
           onClick={() => navigate('/dashboard/agents/new')}
-          className="gradient-btn flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm"
+          className="gradient-btn flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm"
         >
-          <Plus size={16} /> New Agent
+          <Plus size={15} /> New Agent
         </button>
       </div>
 
       {/* Search + Filter */}
-      <div className="flex items-center gap-3 mb-6 flex-wrap">
+      <div className="flex items-center gap-3 mb-5 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
           <input
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search agents..."
-            className="w-full pl-9 pr-4 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+            className="w-full pl-9 pr-4 py-2 text-sm bg-white/5 border border-[#1e1e2e] rounded-xl focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-slate-300 placeholder-slate-600 transition-all"
           />
         </div>
-        <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+        <div className="flex gap-1 bg-[#111118] border border-[#1e1e2e] rounded-xl p-1">
           {FILTERS.map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                filter === f ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                filter === f ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               {f}
@@ -65,52 +100,61 @@ export default function Agents() {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-16 text-center">
-          <div className="text-5xl mb-4">🤖</div>
-          <h3 className="text-xl font-bold text-gray-900 mb-2">No agents found</h3>
-          <p className="text-gray-500 text-sm mb-6">
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <div className="w-6 h-6 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin" />
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="bg-[#111118] rounded-xl border border-[#1e1e2e] p-16 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto mb-4">
+            <Bot size={28} className="text-violet-400" />
+          </div>
+          <h3 className="text-base font-bold text-white mb-2">No agents found</h3>
+          <p className="text-slate-500 text-sm mb-5">
             {search ? `No agents match "${search}"` : 'Create your first agent to get started.'}
           </p>
           <button
             onClick={() => navigate('/dashboard/agents/new')}
-            className="gradient-btn px-6 py-2.5 rounded-xl font-semibold text-sm inline-flex items-center gap-2"
+            className="gradient-btn px-5 py-2 rounded-xl font-semibold text-sm inline-flex items-center gap-2"
           >
-            <Plus size={15} /> Create Agent
+            <Plus size={14} /> Create Agent
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map(agent => (
             <div
               key={agent.id}
-              className="group bg-white border border-gray-100 rounded-2xl p-5 hover:border-blue-200 hover:shadow-md transition-all cursor-pointer"
+              className="group bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 hover:border-violet-500/30 hover:bg-violet-500/[0.03] transition-all cursor-pointer"
               onClick={() => navigate(`/dashboard/agents/${agent.id}`)}
             >
               <div className="flex items-start gap-3 mb-3">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center text-2xl flex-shrink-0">
-                  {agent.emoji}
+                <div className="w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0">
+                  <Bot size={18} className="text-violet-400" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-gray-900 text-base truncate">{agent.name}</h3>
-                  <p className="text-xs text-gray-400 truncate mt-0.5">{agent.template}</p>
+                  <h3 className="font-semibold text-white text-sm truncate">{agent.name}</h3>
+                  <p className="text-xs text-slate-500 truncate mt-0.5">{agent.template || agent.description || 'Custom Agent'}</p>
                 </div>
-                <span className={`flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0 ${
-                  agent.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'
+                <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                  agent.status === 'active' ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-slate-500/10 text-slate-400 border border-slate-500/20'
                 }`}>
-                  <Circle size={6} className={agent.status === 'active' ? 'fill-green-500 text-green-500' : 'fill-gray-400 text-gray-400'} />
+                  <Circle size={5} className={agent.status === 'active' ? 'fill-green-400' : 'fill-slate-400'} />
                   {agent.status}
                 </span>
               </div>
 
               <div className="flex items-center justify-between mb-3">
                 <div className="flex gap-1.5 flex-wrap">
-                  {agent.channels.map(c => (
-                    <span key={c} className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">{c}</span>
+                  {(agent.channels || []).map(c => (
+                    <span key={c} className="text-xs bg-violet-500/10 text-violet-400 border border-violet-500/20 px-2 py-0.5 rounded-full">{c}</span>
                   ))}
+                  {(!agent.channels || agent.channels.length === 0) && (
+                    <span className="text-xs text-slate-600">No channels</span>
+                  )}
                 </div>
-                <div className="flex items-center gap-1 text-xs text-gray-400">
-                  <MessageSquare size={12} />
+                <div className="flex items-center gap-1 text-xs text-slate-600">
+                  <MessageSquare size={11} />
                   <span>{agent.messages}</span>
                 </div>
               </div>
@@ -118,15 +162,15 @@ export default function Agents() {
               <div className="flex gap-2" onClick={e => e.stopPropagation()}>
                 <button
                   onClick={() => navigate(`/dashboard/agents/${agent.id}?tab=chat`)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold gradient-btn"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold gradient-btn"
                 >
-                  <MessageSquare size={13} /> Chat
+                  <MessageSquare size={12} /> Chat
                 </button>
                 <button
                   onClick={() => navigate(`/dashboard/agents/${agent.id}?tab=personality`)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold border border-[#1e1e2e] text-slate-400 hover:bg-white/5"
                 >
-                  <Edit3 size={13} /> Edit
+                  <Edit3 size={12} /> Edit
                 </button>
               </div>
             </div>
@@ -135,12 +179,12 @@ export default function Agents() {
           {/* Create new */}
           <button
             onClick={() => navigate('/dashboard/agents/new')}
-            className="border-2 border-dashed border-gray-200 rounded-2xl p-5 flex flex-col items-center justify-center gap-2 hover:border-blue-300 hover:bg-blue-50/30 transition-all group min-h-[180px]"
+            className="border border-dashed border-[#1e1e2e] rounded-xl p-5 flex flex-col items-center justify-center gap-2 hover:border-violet-500/40 hover:bg-violet-500/5 transition-all group min-h-[160px]"
           >
-            <div className="w-12 h-12 rounded-full bg-gray-100 group-hover:bg-blue-100 flex items-center justify-center transition-colors">
-              <Plus size={22} className="text-gray-400 group-hover:text-blue-500" />
+            <div className="w-10 h-10 rounded-full bg-white/5 group-hover:bg-violet-500/10 flex items-center justify-center transition-colors">
+              <Plus size={20} className="text-slate-600 group-hover:text-violet-400" />
             </div>
-            <span className="text-sm font-semibold text-gray-400 group-hover:text-blue-500 transition-colors">Create New Agent</span>
+            <span className="text-xs font-semibold text-slate-600 group-hover:text-violet-400 transition-colors">Create New Agent</span>
           </button>
         </div>
       )}

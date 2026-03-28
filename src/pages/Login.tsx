@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2, Zap } from 'lucide-react'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -10,62 +10,75 @@ export default function Login() {
   const [error, setError] = useState('')
   const navigate = useNavigate()
 
-  const mockLogin = (emailVal: string) => {
+  const tryApiLogin = async (emailVal: string, passVal: string) => {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailVal, password: passVal }),
+      })
+      const data = await res.json()
+      if (res.ok && data.token) {
+        localStorage.setItem('dipperai_user', JSON.stringify({ ...data.user, token: data.token }))
+        navigate('/dashboard')
+        return true
+      }
+    } catch {}
+    return false
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!email || !password) return
+    setLoading(true); setError('')
+
+    // Admin god mode
+    if (email === 'admin@dipperai.com' && password === 'DipperAdmin2026!') {
+      localStorage.setItem('dipperai_user', JSON.stringify({ email: 'admin@dipperai.com', name: 'Zach', role: 'admin', plan: 'business' }))
+      navigate('/dashboard')
+      return
+    }
+
+    const ok = await tryApiLogin(email, password)
+    if (!ok) {
+      // Fallback mock login
+      localStorage.setItem('dipperai_user', JSON.stringify({ email, name: email.split('@')[0] }))
+      navigate('/dashboard')
+    }
+    setLoading(false)
+  }
+
+  const handleGoogle = () => {
     setLoading(true)
-    setError('')
     setTimeout(() => {
-      localStorage.setItem('dipperai_user', JSON.stringify({ email: emailVal, name: 'Zach' }))
+      localStorage.setItem('dipperai_user', JSON.stringify({ email: 'zach@example.com', name: 'Zach' }))
       navigate('/dashboard')
     }, 500)
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!email || !password) return
-    // Admin god mode
-    if (email === 'admin@dipperai.com' && password === 'DipperAdmin2026!') {
-      setLoading(true)
-      setError('')
-      setTimeout(() => {
-        localStorage.setItem('dipperai_user', JSON.stringify({
-          email: 'admin@dipperai.com',
-          name: 'Zach',
-          role: 'admin',
-          plan: 'business',
-        }))
-        navigate('/dashboard')
-      }, 500)
-      return
-    }
-    mockLogin(email)
-  }
-
-  const handleGoogle = () => {
-    mockLogin('zach@example.com')
-  }
+  const inputClass = "w-full px-4 py-3 rounded-xl bg-white/5 border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white placeholder-slate-600 text-sm transition-all"
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <Link to="/" className="inline-flex items-center gap-2 mb-6">
-            <div className="w-10 h-10 rounded-xl" style={{ background: 'linear-gradient(135deg, #2563EB, #7C3AED)' }} />
-            <span className="text-2xl font-bold text-gray-900">DipperAI</span>
+          <Link to="/" className="inline-flex items-center gap-2.5 mb-6">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}>
+              <Zap size={18} className="text-white" />
+            </div>
+            <span className="text-2xl font-bold text-white tracking-tight">DipperAI</span>
           </Link>
-          <h1 className="text-3xl font-bold text-gray-900">Welcome back</h1>
-          <p className="text-gray-500 mt-2">Sign in to your account</p>
+          <h1 className="text-2xl font-bold text-white">Welcome back</h1>
+          <p className="text-slate-500 mt-1.5 text-sm">Sign in to your account</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+        <div className="bg-[#111118] border border-[#1e1e2e] rounded-2xl p-7">
           {/* Google */}
-          <button
-            onClick={handleGoogle}
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-3 border border-gray-200 rounded-xl py-3 px-4 text-gray-700 font-medium hover:bg-gray-50 transition-colors mb-6 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {loading ? <Loader2 size={18} className="animate-spin" /> : (
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <button onClick={handleGoogle} disabled={loading}
+            className="w-full flex items-center justify-center gap-3 border border-[#1e1e2e] rounded-xl py-2.5 px-4 text-slate-300 font-medium hover:bg-white/5 transition-colors mb-5 disabled:opacity-60 text-sm">
+            {loading ? <Loader2 size={16} className="animate-spin" /> : (
+              <svg width="16" height="16" viewBox="0 0 18 18" fill="none">
                 <path d="M17.64 9.20455C17.64 8.56636 17.5827 7.95273 17.4764 7.36364H9V10.845H13.8436C13.635 11.97 13.0009 12.9232 12.0477 13.5614V15.8195H14.9564C16.6582 14.2527 17.64 11.9455 17.64 9.20455Z" fill="#4285F4"/>
                 <path d="M9 18C11.43 18 13.4673 17.1941 14.9564 15.8195L12.0477 13.5614C11.2418 14.1014 10.2109 14.4204 9 14.4204C6.65591 14.4204 4.67182 12.8373 3.96409 10.71H0.957275V13.0418C2.43818 15.9832 5.48182 18 9 18Z" fill="#34A853"/>
                 <path d="M3.96409 10.71C3.78409 10.17 3.68182 9.59318 3.68182 9C3.68182 8.40682 3.78409 7.83 3.96409 7.29V4.95818H0.957275C0.347727 6.17318 0 7.54773 0 9C0 10.4523 0.347727 11.8268 0.957275 13.0418L3.96409 10.71Z" fill="#FBBC05"/>
@@ -75,61 +88,43 @@ export default function Login() {
             Continue with Google
           </button>
 
-          <div className="flex items-center gap-3 mb-6">
-            <div className="flex-1 h-px bg-gray-200" />
-            <span className="text-gray-400 text-sm">or</span>
-            <div className="flex-1 h-px bg-gray-200" />
+          <div className="flex items-center gap-3 mb-5">
+            <div className="flex-1 h-px bg-[#1e1e2e]" />
+            <span className="text-slate-600 text-xs">or</span>
+            <div className="flex-1 h-px bg-[#1e1e2e]" />
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="bg-red-50 text-red-600 text-sm px-4 py-3 rounded-xl border border-red-100">
-                {error}
-              </div>
+              <div className="bg-red-500/10 text-red-400 text-sm px-4 py-3 rounded-xl border border-red-500/20">{error}</div>
             )}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                placeholder="you@example.com"
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 placeholder-gray-400 transition-all"
-              />
+              <label className="block text-xs font-semibold text-slate-400 mb-1.5">Email</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@example.com" className={inputClass} />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+              <label className="block text-xs font-semibold text-slate-400 mb-1.5">Password</label>
               <div className="relative">
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  required
-                  placeholder="••••••••"
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 placeholder-gray-400 transition-all pr-12"
-                />
-                <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                  {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
+                <input type={showPw ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••"
+                  className={`${inputClass} pr-12`} />
+                <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-400">
+                  {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
-              <div className="flex justify-end mt-1">
-                <a href="#" className="text-sm text-blue-600 hover:text-blue-700">Forgot password?</a>
+              <div className="flex justify-end mt-1.5">
+                <a href="#" className="text-xs text-violet-400 hover:text-violet-300">Forgot password?</a>
               </div>
             </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="gradient-btn w-full py-3 rounded-xl font-semibold text-base disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {loading ? <><Loader2 size={18} className="animate-spin" /> Signing in...</> : 'Sign In'}
+            <button type="submit" disabled={loading}
+              className="gradient-btn w-full py-2.5 rounded-xl font-semibold text-sm disabled:opacity-60 flex items-center justify-center gap-2">
+              {loading ? <><Loader2 size={15} className="animate-spin" /> Signing in...</> : 'Sign In'}
             </button>
           </form>
         </div>
 
-        <p className="text-center text-gray-500 mt-6 text-sm">
+        <p className="text-center text-slate-500 mt-5 text-sm">
           Don't have an account?{' '}
-          <Link to="/signup" className="text-blue-600 font-semibold hover:text-blue-700">Sign up free</Link>
+          <Link to="/signup" className="text-violet-400 font-semibold hover:text-violet-300">Sign up free</Link>
         </p>
       </div>
     </div>
