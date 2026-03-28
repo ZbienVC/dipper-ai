@@ -45,10 +45,28 @@ type ScheduledMessage = {
   recipient_id: string; created_at: string; last_run?: string;
 };
 
+type ActivityLog = {
+  id: string;
+  user_id: string;
+  agent_id: string;
+  agent_name: string;
+  event_type: 'message_received' | 'message_sent' | 'command_executed' | 'integration_connected' | 'integration_disconnected' | 'agent_created' | 'agent_updated' | 'error' | 'automation_triggered' | 'scheduled_sent';
+  channel: 'web' | 'telegram' | 'sms' | 'discord' | 'twitter' | 'system';
+  summary: string;
+  details?: string;
+  model_used?: string;
+  tokens_used?: number;
+  latency_ms?: number;
+  status: 'success' | 'error';
+  error_message?: string;
+  created_at: string;
+};
+
 type DBSchema = {
   users: User[]; agents: Agent[]; conversations: Conversation[];
   messages: Message[]; integrations: Integration[];
   scheduled_messages: ScheduledMessage[];
+  activity_logs: ActivityLog[];
 };
 
 // ─── Plan Definitions ─────────────────────────────────────────────────────────
@@ -201,6 +219,18 @@ const findUser = (id: string) => db.data.users.find(u => u.id === id);
 const findUserByEmail = (email: string) => db.data.users.find(u => u.email === email.toLowerCase());
 const findAgent = (id: string, userId?: string) => db.data.agents.find(a => a.id === id && a.is_active && (userId ? a.user_id === userId : true));
 
+function logActivity(params: Omit<ActivityLog, 'id' | 'created_at'>) {
+  if (!db?.data?.activity_logs) return;
+  const log: ActivityLog = { id: randomUUID(), created_at: new Date().toISOString(), ...params };
+  db.data.activity_logs.push(log);
+  const userLogs = db.data.activity_logs.filter(l => l.user_id === params.user_id);
+  if (userLogs.length > 10000) {
+    const oldest = userLogs.sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+    db.data.activity_logs = db.data.activity_logs.filter(l => l.id !== oldest.id);
+  }
+  save();
+}
+
 // ─── In-memory cron runner ────────────────────────────────────────────────────
 function parseCronMinute(expr: string): boolean {
   try {
@@ -258,15 +288,16 @@ async function startServer() {
   try {
     const { JSONFileSync } = await import('lowdb/node');
     const adapter = new JSONFileSync<DBSchema>(dbPath);
-    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [] });
+    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [] });
     try { db.read(); } catch { /* fresh */ }
     if (!db.data.scheduled_messages) db.data.scheduled_messages = [];
+    if (!db.data.activity_logs) db.data.activity_logs = [];
     db.write();
     console.log('[DipperAI] File DB:', dbPath);
   } catch {
     console.warn('[DipperAI] Read-only filesystem, using in-memory DB');
     const { MemorySync } = await import('lowdb');
-    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [] });
+    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [] });
   }
 
   startCronRunner();
@@ -367,6 +398,7 @@ async function startServer() {
     };
     db.data.agents.push(agent);
     save();
+    logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'agent_created', channel: 'system', summary: 'Agent created: ' + name, status: 'success' });
     res.json(agent);
   });
 
@@ -434,8 +466,10 @@ async function startServer() {
     history.push({ role: 'user', content: message });
 
     const plan = PLANS[req.user.plan] || PLANS.free;
+    const startTime = Date.now();
     try {
       const { text: content, tokensUsed } = await callAI(activeProvider, effectiveModel, agent.system_prompt, history, plan.maxTokens);
+      const latency_ms = Date.now() - startTime;
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: effectiveModel, created_at: new Date().toISOString() });
       agent.total_messages++;
@@ -444,9 +478,11 @@ async function startServer() {
       req.user.tokens_used_today = (req.user.tokens_used_today || 0) + tokensUsed;
       console.log(`[chat] model=${effectiveModel} tokens=${tokensUsed}`);
       save();
+      logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'web', summary: 'Replied to web chat message', details: content.slice(0, 200), model_used: effectiveModel, tokens_used: tokensUsed, latency_ms, status: 'success' });
       res.json({ content, conversationId: convId, model_used: effectiveModel });
     } catch (e: any) {
       console.error('[chat error]', e?.message, e?.status, e?.error);
+      logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'error', channel: 'web', summary: 'Error during web chat', status: 'error', error_message: e?.message });
       res.status(500).json({ error: e?.message || 'AI call failed', details: e?.error || e?.status });
     }
   });
@@ -746,6 +782,7 @@ async function startServer() {
           db.data.integrations.push({ id: randomUUID(), user_id: userId, type: 'telegram', credentials: encodeCredentials({ botToken }), connected: true, bot_info, agent_id: agentId || undefined, created_at: new Date().toISOString() });
         }
         save();
+        logActivity({ user_id: userId, agent_id: req.body.agentId || '', agent_name: '', event_type: 'integration_connected', channel: 'telegram', summary: 'Connected Telegram integration', status: 'success' });
         return res.json({ success: true, bot_info });
       }
 
@@ -761,6 +798,7 @@ async function startServer() {
         if (existing) { existing.credentials = creds; existing.connected = true; existing.bot_info = bot_info; if (agentId) existing.agent_id = agentId; }
         else db.data.integrations.push({ id: randomUUID(), user_id: userId, type: 'discord', credentials: creds, connected: true, bot_info, agent_id: agentId || undefined, created_at: new Date().toISOString() });
         save();
+        logActivity({ user_id: userId, agent_id: agentId || '', agent_name: '', event_type: 'integration_connected', channel: 'discord', summary: 'Connected Discord integration', status: 'success' });
         return res.json({ success: true, bot_info });
       }
 
@@ -776,6 +814,7 @@ async function startServer() {
         if (existing) { existing.credentials = creds; existing.connected = true; existing.bot_info = phoneNumber; if (agentId) existing.agent_id = agentId; }
         else db.data.integrations.push({ id: randomUUID(), user_id: userId, type: 'sms', credentials: creds, connected: true, bot_info: phoneNumber, agent_id: agentId || undefined, created_at: new Date().toISOString() });
         save();
+        logActivity({ user_id: userId, agent_id: agentId || '', agent_name: '', event_type: 'integration_connected', channel: 'sms', summary: 'Connected SMS integration', status: 'success' });
         return res.json({ success: true, bot_info: phoneNumber });
       }
 
@@ -787,6 +826,7 @@ async function startServer() {
         if (existing) { existing.credentials = creds; existing.connected = true; if (agentId) existing.agent_id = agentId; }
         else db.data.integrations.push({ id: randomUUID(), user_id: userId, type: 'twitter', credentials: creds, connected: true, agent_id: agentId || undefined, created_at: new Date().toISOString() });
         save();
+        logActivity({ user_id: userId, agent_id: agentId || '', agent_name: '', event_type: 'integration_connected', channel: 'twitter', summary: 'Connected Twitter integration', status: 'success' });
         return res.json({ success: true });
       }
 
@@ -859,6 +899,7 @@ async function startServer() {
       await sendTelegramMessage(botToken, chatId, reply);
       agent.total_messages++;
       save();
+      logActivity({ user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'telegram', summary: 'Replied to Telegram message', details: reply.slice(0, 200), model_used: effectiveModel, status: 'success' });
     } catch (e) { console.error('[telegram webhook error]', e); }
   });
 
@@ -896,7 +937,47 @@ async function startServer() {
       });
       agent.total_messages++;
       save();
+      logActivity({ user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'sms', summary: 'Replied to SMS message', details: reply.slice(0, 200), model_used: agent.model, status: 'success' });
     } catch (e) { console.error('[sms inbound error]', e); }
+  });
+
+  // ─── Activity ─────────────────────────────────────────────────────────────
+  app.get('/api/activity', auth, (req: any, res) => {
+    const { agentId, channel, status, limit = '50', offset = '0' } = req.query as Record<string, string>;
+    const lim = Math.min(parseInt(limit) || 50, 200);
+    const off = parseInt(offset) || 0;
+    let logs = db.data.activity_logs.filter(l => l.user_id === req.userId);
+    if (agentId) logs = logs.filter(l => l.agent_id === agentId);
+    if (channel) logs = logs.filter(l => l.channel === channel);
+    if (status) logs = logs.filter(l => l.status === status);
+    logs = [...logs].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    res.json({ logs: logs.slice(off, off + lim), total: logs.length });
+  });
+
+  app.get('/api/activity/stats', auth, (req: any, res) => {
+    const allLogs = db.data.activity_logs.filter(l => l.user_id === req.userId);
+    const today = new Date().toISOString().split('T')[0];
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const messageLogs = allLogs.filter(l => l.event_type === 'message_sent' || l.event_type === 'message_received');
+    const messagesToday = messageLogs.filter(l => l.created_at.startsWith(today)).length;
+    const messagesThisWeek = messageLogs.filter(l => l.created_at >= weekAgo).length;
+    const withLatency = allLogs.filter(l => l.latency_ms != null && l.latency_ms > 0);
+    const avgResponseTimeMs = withLatency.length > 0
+      ? Math.round(withLatency.reduce((sum, l) => sum + (l.latency_ms || 0), 0) / withLatency.length)
+      : 0;
+    const successLogs = allLogs.filter(l => l.status === 'success').length;
+    const successRate = allLogs.length > 0 ? Math.round((successLogs / allLogs.length) * 100) : 100;
+    const channelCounts: Record<string, number> = {};
+    allLogs.forEach(l => { channelCounts[l.channel] = (channelCounts[l.channel] || 0) + 1; });
+    const topChannels = Object.entries(channelCounts).sort((a, b) => b[1] - a[1]).map(([channel, count]) => ({ channel, count }));
+    const activeAgents = [...new Set(allLogs.map(l => l.agent_id))].length;
+    res.json({ totalMessages: messageLogs.length, messagesToday, messagesThisWeek, avgResponseTimeMs, successRate, topChannels, activeAgents });
+  });
+
+  app.delete('/api/activity', auth, (req: any, res) => {
+    db.data.activity_logs = db.data.activity_logs.filter(l => l.user_id !== req.userId);
+    save();
+    res.json({ success: true });
   });
 
   // ─── Frontend ─────────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ import Templates from './pages/Templates'
 import Integrations from './pages/Integrations'
 import Approvals from './pages/Approvals'
 import Analytics from './pages/Analytics'
+import ActivityPage from './pages/Activity'
 import Settings from './pages/Settings'
 import Billing from './pages/Billing'
 import Admin from './pages/Admin'
@@ -44,6 +45,7 @@ function App() {
         <Route path="/dashboard/integrations" element={<PrivateRoute><Integrations /></PrivateRoute>} />
         <Route path="/dashboard/approvals" element={<PrivateRoute><Approvals /></PrivateRoute>} />
         <Route path="/dashboard/analytics" element={<PrivateRoute><Analytics /></PrivateRoute>} />
+        <Route path="/dashboard/activity" element={<PrivateRoute><ActivityPage /></PrivateRoute>} />
         <Route path="/dashboard/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
         <Route path="/dashboard/billing" element={<PrivateRoute><Billing /></PrivateRoute>} />
 
@@ -56,4 +58,3 @@ function App() {
 }
 
 export default App
-

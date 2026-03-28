@@ -1,17 +1,28 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
-import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3, ArrowRight } from 'lucide-react'
+import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3, ArrowRight, Send, Clock } from 'lucide-react'
 
 function getToken() {
   try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
+}
+
+function timeAgo(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime()
+  const s = Math.floor(diff / 1000)
+  if (s < 60) return `${s}s ago`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
 }
 
 const quickActions = [
   { label: 'Create Agent', icon: Plus, path: '/dashboard/agents/new', primary: true },
   { label: 'Templates', icon: LayoutTemplate, path: '/dashboard/templates', primary: false },
   { label: 'Integrations', icon: Plug, path: '/dashboard/integrations', primary: false },
-  { label: 'Analytics', icon: Activity, path: '/dashboard/analytics', primary: false },
+  { label: 'Activity', icon: Activity, path: '/dashboard/activity', primary: false },
 ]
 
 export default function Dashboard() {
@@ -20,6 +31,7 @@ export default function Dashboard() {
   const [analytics, setAnalytics] = useState<{ totalMessages: number } | null>(null)
   const [integrationCount, setIntegrationCount] = useState(0)
   const [usage, setUsage] = useState<{ plan: string; messagesUsedToday: number; messagesLimitToday: number } | null>(null)
+  const [recentActivity, setRecentActivity] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -30,11 +42,13 @@ export default function Dashboard() {
       fetch('/api/analytics', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()).catch(() => null),
       fetch('/api/integrations', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()).catch(() => []),
       fetch('/api/usage', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null).catch(() => null),
-    ]).then(([agentData, analyticsData, integrationData, usageData]) => {
+      fetch('/api/activity?limit=5', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : { logs: [] }).catch(() => ({ logs: [] })),
+    ]).then(([agentData, analyticsData, integrationData, usageData, activityData]) => {
       if (Array.isArray(agentData)) setAgents(agentData)
       if (analyticsData) setAnalytics(analyticsData)
       if (Array.isArray(integrationData)) setIntegrationCount(integrationData.filter((i: any) => i.connected).length)
       if (usageData) setUsage(usageData)
+      if (activityData?.logs) setRecentActivity(activityData.logs)
     }).finally(() => setLoading(false))
   }, [])
 
@@ -216,33 +230,44 @@ export default function Dashboard() {
         <div className="bg-[#111118] rounded-xl p-5 border border-[#1e1e2e] h-fit">
           <div className="flex items-center gap-2 mb-4">
             <Activity size={15} className="text-slate-400" />
-            <h2 className="text-sm font-semibold text-white">Activity Feed</h2>
+            <h2 className="text-sm font-semibold text-white">Recent Activity</h2>
           </div>
           {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="w-5 h-5 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin" />
+            <div className="space-y-3.5">
+              {[0,1,2].map(i => (
+                <div key={i} className="flex items-start gap-3 animate-pulse">
+                  <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 bg-white/10" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-2.5 w-40 bg-white/5 rounded" />
+                    <div className="h-2 w-24 bg-white/5 rounded" />
+                  </div>
+                </div>
+              ))}
             </div>
-          ) : activeAgents.length === 0 ? (
+          ) : recentActivity.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-slate-600 text-xs">No activity yet.</p>
               <p className="text-slate-700 text-xs mt-1">Create an agent to see activity here.</p>
             </div>
           ) : (
             <div className="space-y-3.5">
-              {activeAgents.slice(0, 5).map((agent: any, i: number) => (
-                <div key={i} className="flex items-start gap-3">
-                  <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 bg-violet-500" />
-                  <div>
-                    <p className="text-xs text-slate-300 leading-snug">{agent.name} — {(agent.total_messages || 0).toLocaleString()} total messages</p>
-                    <p className="text-xs text-slate-600 mt-0.5">{agent.is_active ? 'Active' : 'Paused'}</p>
+              {recentActivity.map((log: any) => (
+                <div key={log.id} className="flex items-start gap-3">
+                  <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${log.status === 'error' ? 'bg-red-500' : 'bg-violet-500'}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-slate-300 leading-snug truncate">
+                      <span className="font-semibold text-white">{log.agent_name || 'System'}</span>
+                      {' — '}{log.summary}
+                    </p>
+                    <p className="text-xs text-slate-600 mt-0.5">{timeAgo(log.created_at)}</p>
                   </div>
                 </div>
               ))}
             </div>
           )}
           <button className="mt-4 w-full text-xs text-violet-400 font-medium hover:text-violet-300 transition-colors text-left"
-            onClick={() => navigate('/dashboard/analytics')}>
-            View analytics →
+            onClick={() => navigate('/dashboard/activity')}>
+            View all activity →
           </button>
         </div>
       </div>
