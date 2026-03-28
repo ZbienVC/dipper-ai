@@ -78,7 +78,7 @@ export default function AgentDetail() {
   const [editTone, setEditTone] = useState('')
   const [editCommStyle, setEditCommStyle] = useState('')
   const [saved, setSaved] = useState(false)
-  const [selectedModel, setSelectedModel] = useState('gemini-1.5-flash')
+  const [selectedModel, setSelectedModel] = useState('claude-3-5-haiku-20241022')
   const [editAdjectives, setEditAdjectives] = useState('Helpful, Professional, Concise')
   const [editTopics, setEditTopics] = useState('')
   const [editForbiddenWords, setEditForbiddenWords] = useState('')
@@ -513,3 +513,4 @@ export default function AgentDetail() {
     </DashboardLayout>
   )
 }
+
