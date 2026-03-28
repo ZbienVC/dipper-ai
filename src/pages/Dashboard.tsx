@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
-import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3 } from 'lucide-react'
+import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3, ArrowRight } from 'lucide-react'
 
 function getToken() {
   try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
@@ -19,6 +19,7 @@ export default function Dashboard() {
   const [agents, setAgents] = useState<any[]>([])
   const [analytics, setAnalytics] = useState<{ totalMessages: number } | null>(null)
   const [integrationCount, setIntegrationCount] = useState(0)
+  const [usage, setUsage] = useState<{ plan: string; messagesUsedToday: number; messagesLimitToday: number } | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -28,10 +29,12 @@ export default function Dashboard() {
       fetch('/api/agents', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()).catch(() => []),
       fetch('/api/analytics', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()).catch(() => null),
       fetch('/api/integrations', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()).catch(() => []),
-    ]).then(([agentData, analyticsData, integrationData]) => {
+      fetch('/api/usage', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([agentData, analyticsData, integrationData, usageData]) => {
       if (Array.isArray(agentData)) setAgents(agentData)
       if (analyticsData) setAnalytics(analyticsData)
       if (Array.isArray(integrationData)) setIntegrationCount(integrationData.filter((i: any) => i.connected).length)
+      if (usageData) setUsage(usageData)
     }).finally(() => setLoading(false))
   }, [])
 
@@ -47,6 +50,38 @@ export default function Dashboard() {
 
   return (
     <DashboardLayout title="Dashboard">
+      {/* Free plan banner */}
+      {!loading && usage?.plan === 'free' && (
+        <div className="mb-5 bg-violet-500/10 border border-violet-500/20 rounded-xl p-4 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p className="text-sm font-semibold text-white">You're on the Free plan</p>
+            <p className="text-xs text-slate-400 mt-0.5">Upgrade to unlock more agents, messages, and premium AI models.</p>
+          </div>
+          <Link to="/dashboard/billing" className="gradient-btn flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold flex-shrink-0">
+            Upgrade <ArrowRight size={14} />
+          </Link>
+        </div>
+      )}
+
+      {/* Usage bar */}
+      {!loading && usage && (
+        <div className="mb-5 bg-[#111118] border border-[#1e1e2e] rounded-xl p-4">
+          <div className="flex justify-between text-xs mb-1.5">
+            <span className="text-slate-400 font-semibold">Messages today</span>
+            <span className="text-slate-300 font-bold">{usage.messagesUsedToday} / {usage.messagesLimitToday}</span>
+          </div>
+          <div className="w-full bg-white/5 rounded-full h-1.5">
+            <div
+              className={`h-1.5 rounded-full transition-all ${
+                usage.messagesUsedToday / usage.messagesLimitToday >= 1 ? 'bg-red-500' :
+                usage.messagesUsedToday / usage.messagesLimitToday >= 0.8 ? 'bg-amber-500' : 'bg-violet-500'
+              }`}
+              style={{ width: `${Math.min((usage.messagesUsedToday / usage.messagesLimitToday) * 100, 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         {metrics.map(m => (

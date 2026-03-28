@@ -75,6 +75,7 @@ export default function AgentDetail() {
   const [newResponse, setNewResponse] = useState('')
   const [newDescription, setNewDescription] = useState('')
   const [integrationRecords, setIntegrationRecords] = useState<{ type: string; connected: boolean; bot_info?: string; agent_id?: string }[]>([])
+  const [usageStats, setUsageStats] = useState<{ messagesUsedToday: number; messagesLimitToday: number; allowedModels: string[] } | null>(null)
 
   useEffect(() => {
     const token = getToken()
@@ -82,6 +83,15 @@ export default function AgentDetail() {
     fetch('/api/integrations', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : [])
       .then((d: any[]) => setIntegrationRecords(d))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const token = getToken()
+    if (!token) return
+    fetch('/api/usage', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then((d: any) => d && setUsageStats(d))
       .catch(() => {})
   }, [])
 
@@ -210,10 +220,22 @@ export default function AgentDetail() {
         </div>
         <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
           className="text-xs bg-white/5 border border-[#1e1e2e] text-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-violet-500/50">
-          <option value="gemini-1.5-flash">Gemini Flash</option>
-          <option value="gemini-1.5-pro">Gemini Pro</option>
-          <option value="claude-haiku-4-5">Claude Haiku</option>
-          <option value="gpt-4o-mini">GPT-4o Mini</option>
+          {[
+            { value: 'claude-haiku-4-5', label: 'Claude Haiku' },
+            { value: 'claude-sonnet-4-5', label: 'Claude Sonnet' },
+            { value: 'claude-opus-4-5', label: 'Claude Opus' },
+            { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+            { value: 'gpt-4o', label: 'GPT-4o' },
+            { value: 'gemini-1.5-flash', label: 'Gemini Flash' },
+            { value: 'gemini-1.5-pro', label: 'Gemini Pro' },
+          ].map(m => {
+            const allowed = !usageStats || usageStats.allowedModels.includes(m.value)
+            return (
+              <option key={m.value} value={m.value}>
+                {allowed ? m.label : `🔒 ${m.label}`}
+              </option>
+            )
+          })}
         </select>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#0a0a0f]">
@@ -265,6 +287,11 @@ export default function AgentDetail() {
             <Send size={14} />
           </button>
         </div>
+        {usageStats && (
+          <p className="text-xs text-slate-600 mt-2 text-right">
+            {usageStats.messagesUsedToday}/{usageStats.messagesLimitToday} messages today
+          </p>
+        )}
       </div>
     </div>
   )

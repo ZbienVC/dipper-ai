@@ -17,10 +17,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const JWT_SECRET = process.env.JWT_SECRET || 'dipperai-dev-secret';
 const PORT = parseInt(process.env.PORT || '3001');
 
-// ─── Database (lowdb — pure JS, no native deps) ──────────────────────────────
+// ─── Database ──────────────────────────────────────────────────────────────────
 type User = {
   id: string; email: string; username: string; password_hash: string;
-  plan: string; messages_today: number; messages_reset_date: string; created_at: string;
+  plan: string; messages_today: number; messages_reset_date: string;
+  tokens_used_today: number; tokens_reset_date: string;
+  created_at: string;
 };
 type Agent = {
   id: string; user_id: string; name: string; emoji: string; description: string;
@@ -28,6 +30,7 @@ type Agent = {
   total_messages: number; is_active: boolean; embed_token: string;
   deployed_telegram_token?: string; deployed_discord_webhook?: string;
   deployed_embed_enabled: boolean; created_at: string; updated_at: string;
+  autonomous_mode?: boolean; response_delay_ms?: number;
 };
 type Message = { id: string; conversation_id: string; role: string; content: string; model_used?: string; created_at: string; };
 type Conversation = { id: string; agent_id: string; user_id?: string; channel: string; message_count: number; created_at: string; };
@@ -36,17 +39,38 @@ type Integration = {
   credentials: Record<string, string>;
   connected: boolean; bot_info?: string; agent_id?: string; created_at: string;
 };
-
-type DBSchema = { users: User[]; agents: Agent[]; conversations: Conversation[]; messages: Message[]; integrations: Integration[]; };
-
-// DB initialized in startServer()
-
-// ─── Plan Limits ─────────────────────────────────────────────────────────────
-const PLAN_LIMITS: Record<string, { agents: number; messagesPerDay: number }> = {
-  free:     { agents: 1,  messagesPerDay: 20   },
-  pro:      { agents: 5,  messagesPerDay: 500  },
-  business: { agents: 25, messagesPerDay: 5000 },
+type ScheduledMessage = {
+  id: string; agent_id: string; user_id: string;
+  message: string; cron_expression: string; channel: string;
+  recipient_id: string; created_at: string; last_run?: string;
 };
+
+type DBSchema = {
+  users: User[]; agents: Agent[]; conversations: Conversation[];
+  messages: Message[]; integrations: Integration[];
+  scheduled_messages: ScheduledMessage[];
+};
+
+// ─── Plan Definitions ─────────────────────────────────────────────────────────
+const PLANS: Record<string, { agents: number; messagesPerDay: number; allowedModels: string[]; maxTokens: number }> = {
+  free:     { agents: 1,  messagesPerDay: 20,   allowedModels: ['claude-haiku-4-5'], maxTokens: 512  },
+  pro:      { agents: 5,  messagesPerDay: 500,  allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'gpt-4o-mini'], maxTokens: 1024 },
+  business: { agents: 25, messagesPerDay: 5000, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 2048 },
+};
+
+// Backward compat for code that used PLAN_LIMITS
+const PLAN_LIMITS = Object.fromEntries(
+  Object.entries(PLANS).map(([k, v]) => [k, { agents: v.agents, messagesPerDay: v.messagesPerDay }])
+);
+
+function getEffectiveModel(user: User, requestedModel: string): string {
+  const plan = PLANS[user.plan] || PLANS.free;
+  if (plan.allowedModels.includes(requestedModel)) return requestedModel;
+  // Downgrade silently to cheapest model on plan
+  const cheapest = plan.allowedModels[0];
+  console.log(`[model-gate] User ${user.email} requested ${requestedModel}, using ${cheapest} (plan: ${user.plan})`);
+  return cheapest;
+}
 
 // ─── Agent Templates ──────────────────────────────────────────────────────────
 const AGENT_TEMPLATES = [
@@ -74,6 +98,12 @@ function auth(req: any, res: any, next: any) {
   }
 }
 
+function adminAuth(req: any, res: any, next: any) {
+  const adminToken = req.headers['x-admin-token'];
+  if (adminToken !== 'admin-token') return res.status(401).json({ error: 'Admin unauthorized' });
+  next();
+}
+
 function checkLimit(user: User, type: 'agents' | 'messages') {
   const limits = PLAN_LIMITS[user.plan] || PLAN_LIMITS.free;
   if (type === 'agents') {
@@ -92,22 +122,35 @@ function checkLimit(user: User, type: 'agents' | 'messages') {
   return true;
 }
 
+function resetTokensIfNeeded(user: User) {
+  const today = new Date().toISOString().split('T')[0];
+  if (user.tokens_reset_date !== today) {
+    user.tokens_used_today = 0;
+    user.tokens_reset_date = today;
+  }
+}
+
 // ─── AI Call ──────────────────────────────────────────────────────────────────
-async function callAI(provider: string, model: string, systemPrompt: string, messages: any[]) {
+async function callAI(provider: string, model: string, systemPrompt: string, messages: any[], maxTokens = 1024) {
   if (provider === 'anthropic') {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const response = await client.messages.create({
-      model, max_tokens: 1024, system: systemPrompt,
+      model, max_tokens: maxTokens, system: systemPrompt,
       messages: messages.map((m: any) => ({ role: m.role, content: m.content })),
     });
-    return (response.content[0] as any).text as string;
+    const text = (response.content[0] as any).text as string;
+    const tokensUsed = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+    return { text, tokensUsed };
   }
   if (provider === 'openai') {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const response = await client.chat.completions.create({
-      model, messages: [{ role: 'system', content: systemPrompt }, ...messages],
+      model, max_tokens: maxTokens,
+      messages: [{ role: 'system', content: systemPrompt }, ...messages],
     });
-    return response.choices[0].message.content || '';
+    const text = response.choices[0].message.content || '';
+    const tokensUsed = response.usage?.total_tokens || 0;
+    return { text, tokensUsed };
   }
   if (provider === 'google') {
     const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
@@ -119,7 +162,7 @@ async function callAI(provider: string, model: string, systemPrompt: string, mes
       })),
     });
     const result = await chat.sendMessage({ message: messages[messages.length - 1].content });
-    return result.text || '';
+    return { text: result.text || '', tokensUsed: 0 };
   }
   throw new Error(`Unknown provider: ${provider}`);
 }
@@ -136,6 +179,21 @@ function decodeCredentials(creds: Record<string, string>): Record<string, string
   return out;
 }
 
+// Send Telegram message helper
+async function sendTelegramMessage(botToken: string, chatId: string | number, text: string) {
+  return fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
+  });
+}
+
+async function sendTelegramTyping(botToken: string, chatId: string | number) {
+  return fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, action: 'typing' }),
+  });
+}
+
 // ─── Express ──────────────────────────────────────────────────────────────────
 let db: Low<DBSchema>;
 const save = () => { try { db.write(); } catch { /* in-memory mode */ } };
@@ -143,27 +201,84 @@ const findUser = (id: string) => db.data.users.find(u => u.id === id);
 const findUserByEmail = (email: string) => db.data.users.find(u => u.email === email.toLowerCase());
 const findAgent = (id: string, userId?: string) => db.data.agents.find(a => a.id === id && a.is_active && (userId ? a.user_id === userId : true));
 
+// ─── In-memory cron runner ────────────────────────────────────────────────────
+function parseCronMinute(expr: string): boolean {
+  try {
+    const parts = expr.trim().split(/\s+/);
+    if (parts.length !== 5) return false;
+    const now = new Date();
+    const [minute, hour, dom, month, dow] = parts;
+    const match = (field: string, val: number) => {
+      if (field === '*') return true;
+      const num = parseInt(field);
+      return !isNaN(num) && num === val;
+    };
+    return match(minute, now.getMinutes())
+      && match(hour, now.getHours())
+      && match(dom, now.getDate())
+      && match(month, now.getMonth() + 1)
+      && match(dow, now.getDay());
+  } catch { return false; }
+}
+
+function startCronRunner() {
+  setInterval(async () => {
+    if (!db?.data?.scheduled_messages) return;
+    const now = new Date().toISOString().slice(0, 16); // minute-precision
+    for (const scheduled of db.data.scheduled_messages) {
+      if (scheduled.last_run === now) continue; // already ran this minute
+      if (!parseCronMinute(scheduled.cron_expression)) continue;
+      scheduled.last_run = now;
+      save();
+      try {
+        const agent = db.data.agents.find(a => a.id === scheduled.agent_id && a.is_active);
+        if (!agent) continue;
+        const user = findUser(scheduled.user_id);
+        if (!user) continue;
+        const effectiveModel = getEffectiveModel(user, agent.model);
+        const provider = effectiveModel.startsWith('gpt') ? 'openai' : effectiveModel.startsWith('gemini') ? 'google' : 'anthropic';
+        const { text } = await callAI(provider, effectiveModel, agent.system_prompt, [{ role: 'user', content: scheduled.message }]);
+        if (scheduled.channel === 'telegram') {
+          const intg = db.data.integrations.find(i => i.user_id === agent.user_id && i.type === 'telegram' && i.connected);
+          if (intg) {
+            const { botToken } = decodeCredentials(intg.credentials);
+            if (botToken) {
+              await sendTelegramMessage(botToken, scheduled.recipient_id, text);
+            }
+          }
+        }
+      } catch (e) { console.error('[cron error]', e); }
+    }
+  }, 60_000);
+}
+
 async function startServer() {
   // Initialize DB
   const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'dipperai.json');
   try {
     const { JSONFileSync } = await import('lowdb/node');
     const adapter = new JSONFileSync<DBSchema>(dbPath);
-    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [] });
+    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [] });
     try { db.read(); } catch { /* fresh */ }
-    db.write(); // test write access
+    if (!db.data.scheduled_messages) db.data.scheduled_messages = [];
+    db.write();
     console.log('[DipperAI] File DB:', dbPath);
   } catch {
     console.warn('[DipperAI] Read-only filesystem, using in-memory DB');
     const { MemorySync } = await import('lowdb');
-    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [] });
+    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [] });
   }
+
+  startCronRunner();
 
   const app = express();
   app.use(cors({ origin: true, credentials: true }));
+
+  // Stripe webhook needs raw body
+  app.use('/api/billing/webhook', express.raw({ type: 'application/json' }));
   app.use(express.json());
 
-  // Auth
+  // ─── Auth ──────────────────────────────────────────────────────────────────
   app.post('/api/auth/register', async (req, res) => {
     try {
       const { email, username, password } = req.body;
@@ -171,9 +286,12 @@ async function startServer() {
       if (findUserByEmail(email)) return res.status(409).json({ error: 'Email already taken' });
       if (db.data.users.find(u => u.username === username)) return res.status(409).json({ error: 'Username already taken' });
       const id = randomUUID();
+      const today = new Date().toISOString().split('T')[0];
       const user: User = {
         id, email: email.toLowerCase(), username, password_hash: await bcrypt.hash(password, 10),
-        plan: 'free', messages_today: 0, messages_reset_date: '', created_at: new Date().toISOString(),
+        plan: 'free', messages_today: 0, messages_reset_date: today,
+        tokens_used_today: 0, tokens_reset_date: today,
+        created_at: new Date().toISOString(),
       };
       db.data.users.push(user);
       save();
@@ -201,10 +319,33 @@ async function startServer() {
     res.json({ id, email, username, plan, agentCount, limits: PLAN_LIMITS[plan] || PLAN_LIMITS.free });
   });
 
+  // ─── Usage ────────────────────────────────────────────────────────────────
+  app.get('/api/usage', auth, (req: any, res) => {
+    const user: User = req.user;
+    resetTokensIfNeeded(user);
+    const today = new Date().toISOString().split('T')[0];
+    if (user.messages_reset_date !== today) {
+      user.messages_today = 0;
+      user.messages_reset_date = today;
+      save();
+    }
+    const plan = PLANS[user.plan] || PLANS.free;
+    const agentCount = db.data.agents.filter(a => a.user_id === user.id && a.is_active).length;
+    res.json({
+      plan: user.plan,
+      messagesUsedToday: user.messages_today,
+      messagesLimitToday: plan.messagesPerDay,
+      tokensUsedToday: user.tokens_used_today || 0,
+      agentsUsed: agentCount,
+      agentsLimit: plan.agents,
+      allowedModels: plan.allowedModels,
+    });
+  });
+
   // Templates
   app.get('/api/templates', (_req, res) => res.json(AGENT_TEMPLATES));
 
-  // Agents
+  // ─── Agents ───────────────────────────────────────────────────────────────
   app.get('/api/agents', auth, (req: any, res) => {
     res.json(db.data.agents.filter(a => a.user_id === req.userId && a.is_active).sort((a, b) => b.created_at.localeCompare(a.created_at)));
   });
@@ -212,7 +353,7 @@ async function startServer() {
   app.post('/api/agents', auth, (req: any, res) => {
     if (!checkLimit(req.user, 'agents'))
       return res.status(403).json({ error: `Agent limit reached for ${req.user.plan} plan.` });
-    const { name, emoji, description, systemPrompt, model, provider, templateId } = req.body;
+    const { name, emoji, description, systemPrompt, model, provider, templateId, autonomous_mode, response_delay_ms } = req.body;
     if (!name || !systemPrompt) return res.status(400).json({ error: 'Name and system prompt required' });
     const agent: Agent = {
       id: randomUUID(), user_id: req.userId, name, emoji: emoji || '🤖',
@@ -220,6 +361,8 @@ async function startServer() {
       model: model || 'claude-haiku-4-5', provider: provider || 'anthropic',
       template_id: templateId, total_messages: 0, is_active: true,
       embed_token: randomUUID().replace(/-/g, ''), deployed_embed_enabled: false,
+      autonomous_mode: autonomous_mode || false,
+      response_delay_ms: response_delay_ms || 0,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     };
     db.data.agents.push(agent);
@@ -236,13 +379,15 @@ async function startServer() {
   app.put('/api/agents/:id', auth, (req: any, res) => {
     const agent = findAgent(req.params.id, req.userId);
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
-    const { name, emoji, description, systemPrompt, model, provider } = req.body;
+    const { name, emoji, description, systemPrompt, model, provider, autonomous_mode, response_delay_ms } = req.body;
     if (name) agent.name = name;
     if (emoji) agent.emoji = emoji;
     if (description !== undefined) agent.description = description;
     if (systemPrompt) agent.system_prompt = systemPrompt;
     if (model) agent.model = model;
     if (provider) agent.provider = provider;
+    if (autonomous_mode !== undefined) agent.autonomous_mode = autonomous_mode;
+    if (response_delay_ms !== undefined) agent.response_delay_ms = response_delay_ms;
     agent.updated_at = new Date().toISOString();
     save();
     res.json(agent);
@@ -252,14 +397,13 @@ async function startServer() {
     const agent = findAgent(req.params.id, req.userId);
     if (agent) {
       agent.is_active = false;
-      // Unassign any integrations pointing at this agent
       db.data.integrations.forEach(i => { if (i.agent_id === agent.id) i.agent_id = undefined; });
       save();
     }
     res.json({ success: true });
   });
 
-  // Chat
+  // ─── Chat ─────────────────────────────────────────────────────────────────
   app.post('/api/agents/:id/chat', auth, async (req: any, res) => {
     const agent = findAgent(req.params.id, req.userId);
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
@@ -267,15 +411,18 @@ async function startServer() {
       return res.status(429).json({ error: 'Daily message limit reached.' });
     const { message, conversationId, model: requestedModel } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
-    
+
     // Sanitize model name — fix incomplete IDs
     const modelMap: Record<string, string> = {
       'claude-3-5-haiku': 'claude-haiku-4-5',
       'claude-3-5-sonnet': 'claude-sonnet-4-5',
       'claude-3-opus': 'claude-opus-4-5',
     };
-    const activeModel = modelMap[requestedModel || agent.model] || requestedModel || agent.model;
-    const activeProvider = activeModel.startsWith('gpt') ? 'openai' : activeModel.startsWith('gemini') ? 'google' : 'anthropic';
+    const rawModel = modelMap[requestedModel || agent.model] || requestedModel || agent.model;
+
+    // Plan-based model gating — silently downgrade
+    const effectiveModel = getEffectiveModel(req.user, rawModel);
+    const activeProvider = effectiveModel.startsWith('gpt') ? 'openai' : effectiveModel.startsWith('gemini') ? 'google' : 'anthropic';
 
     let convId = conversationId;
     if (!convId) {
@@ -286,21 +433,54 @@ async function startServer() {
     const history = db.data.messages.filter(m => m.conversation_id === convId).map(m => ({ role: m.role, content: m.content }));
     history.push({ role: 'user', content: message });
 
+    const plan = PLANS[req.user.plan] || PLANS.free;
     try {
-      const content = await callAI(activeProvider, activeModel, agent.system_prompt, history);
+      const { text: content, tokensUsed } = await callAI(activeProvider, effectiveModel, agent.system_prompt, history, plan.maxTokens);
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
-      db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: activeModel, created_at: new Date().toISOString() });
+      db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: effectiveModel, created_at: new Date().toISOString() });
       agent.total_messages++;
       req.user.messages_today++;
+      resetTokensIfNeeded(req.user);
+      req.user.tokens_used_today = (req.user.tokens_used_today || 0) + tokensUsed;
+      console.log(`[chat] model=${effectiveModel} tokens=${tokensUsed}`);
       save();
-      res.json({ content, conversationId: convId });
+      res.json({ content, conversationId: convId, model_used: effectiveModel });
     } catch (e: any) {
       console.error('[chat error]', e?.message, e?.status, e?.error);
       res.status(500).json({ error: e?.message || 'AI call failed', details: e?.error || e?.status });
     }
   });
 
-  // Legacy chat (no auth — for test interface)
+  // ─── Schedule message ──────────────────────────────────────────────────────
+  app.post('/api/agents/:id/schedule', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { message, cronExpression, channel, recipientId } = req.body;
+    if (!message || !cronExpression || !channel || !recipientId)
+      return res.status(400).json({ error: 'message, cronExpression, channel, recipientId required' });
+    const scheduled: ScheduledMessage = {
+      id: randomUUID(), agent_id: agent.id, user_id: req.userId,
+      message, cron_expression: cronExpression, channel, recipient_id: recipientId,
+      created_at: new Date().toISOString(),
+    };
+    db.data.scheduled_messages.push(scheduled);
+    save();
+    res.json(scheduled);
+  });
+
+  app.get('/api/agents/:id/schedules', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    res.json(db.data.scheduled_messages.filter(s => s.agent_id === agent.id));
+  });
+
+  app.delete('/api/agents/:id/schedules/:scheduleId', auth, (req: any, res) => {
+    const idx = db.data.scheduled_messages.findIndex(s => s.id === req.params.scheduleId && s.user_id === req.userId);
+    if (idx !== -1) { db.data.scheduled_messages.splice(idx, 1); save(); }
+    res.json({ success: true });
+  });
+
+  // Legacy chat
   app.post('/api/chat', async (req, res) => {
     const { message, conversationHistory = [], agentName, personality, model: requestedModel } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
@@ -313,7 +493,7 @@ async function startServer() {
     try {
       const model = requestedModel || 'claude-haiku-4-5';
       const provider = model.startsWith('gpt') ? 'openai' : model.startsWith('gemini') ? 'google' : 'anthropic';
-      const content = await callAI(provider, model, systemPrompt, messages);
+      const { text: content } = await callAI(provider, model, systemPrompt, messages);
       res.json({ reply: content });
     } catch (e: any) {
       console.error('[chat error]', e?.message, e?.status, e?.error);
@@ -321,25 +501,178 @@ async function startServer() {
     }
   });
 
-  // Test AI connectivity
   app.get('/api/test-ai', async (_req, res) => {
     try {
-      const content = await callAI('anthropic', 'claude-haiku-4-5', 'You are a test bot.', [{ role: 'user', content: 'Say OK' }]);
+      const { text: content } = await callAI('anthropic', 'claude-haiku-4-5', 'You are a test bot.', [{ role: 'user', content: 'Say OK' }]);
       res.json({ status: 'ok', reply: content });
     } catch (e: any) {
       res.status(500).json({ status: 'error', error: e?.message, details: e?.error });
     }
   });
-  // Analytics
+
   app.get('/api/analytics', auth, (req: any, res) => {
     const agents = db.data.agents.filter(a => a.user_id === req.userId && a.is_active);
     const totalMessages = agents.reduce((sum, a) => sum + a.total_messages, 0);
     res.json({ agents: agents.map(a => ({ id: a.id, name: a.name, emoji: a.emoji, total_messages: a.total_messages })), totalMessages });
   });
 
-  // Healthcheck
   app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+
+  // ─── Billing ──────────────────────────────────────────────────────────────
+  app.post('/api/billing/checkout', auth, async (req: any, res) => {
+    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    if (!stripeKey) return res.json({ error: 'Billing not configured', demo: true });
+
+    const { plan } = req.body;
+    if (!plan || !['pro', 'business'].includes(plan)) return res.status(400).json({ error: 'Invalid plan' });
+
+    const priceId = plan === 'pro' ? process.env.STRIPE_PRO_PRICE_ID : process.env.STRIPE_BUSINESS_PRICE_ID;
+    if (!priceId) return res.json({ error: 'Billing not configured', demo: true });
+
+    try {
+      const Stripe = (await import('stripe')).default;
+      const stripe = new Stripe(stripeKey, { apiVersion: '2025-02-24.acacia' as any });
+      const appUrl = process.env.APP_URL || 'http://localhost:3001';
+      const session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        customer_email: req.user.email,
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${appUrl}/dashboard/billing?success=true`,
+        cancel_url: `${appUrl}/dashboard/billing`,
+        metadata: { userId: req.userId, plan },
+      });
+      res.json({ url: session.url });
+    } catch (e: any) {
+      console.error('[stripe checkout error]', e?.message);
+      res.status(500).json({ error: e?.message || 'Stripe error' });
+    }
+  });
+
+  app.post('/api/billing/webhook', async (req, res) => {
+    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!stripeKey || !webhookSecret) return res.json({ received: true });
+
+    try {
+      const Stripe = (await import('stripe')).default;
+      const stripe = new Stripe(stripeKey, { apiVersion: '2025-02-24.acacia' as any });
+      const sig = req.headers['stripe-signature'] as string;
+      const event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+
+      if (event.type === 'checkout.session.completed') {
+        const session = event.data.object as any;
+        const customerEmail = session.customer_email || session.customer_details?.email;
+        const plan = session.metadata?.plan;
+        if (customerEmail && plan) {
+          const user = findUserByEmail(customerEmail);
+          if (user) { user.plan = plan; save(); }
+        }
+      }
+
+      if (event.type === 'customer.subscription.deleted') {
+        const subscription = event.data.object as any;
+        const customerId = subscription.customer;
+        // Get customer email from Stripe
+        try {
+          const customer = await stripe.customers.retrieve(customerId) as any;
+          if (customer.email) {
+            const user = findUserByEmail(customer.email);
+            if (user) { user.plan = 'free'; save(); }
+          }
+        } catch {}
+      }
+
+      res.json({ received: true });
+    } catch (e: any) {
+      console.error('[stripe webhook error]', e?.message);
+      res.status(400).json({ error: e?.message });
+    }
+  });
+
+  app.get('/api/billing/portal', auth, async (req: any, res) => {
+    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    if (!stripeKey) return res.json({ error: 'Billing not configured', demo: true });
+
+    try {
+      const Stripe = (await import('stripe')).default;
+      const stripe = new Stripe(stripeKey, { apiVersion: '2025-02-24.acacia' as any });
+
+      // Find or create customer
+      const customers = await stripe.customers.list({ email: req.user.email, limit: 1 });
+      let customerId = customers.data[0]?.id;
+      if (!customerId) {
+        const customer = await stripe.customers.create({ email: req.user.email });
+        customerId = customer.id;
+      }
+
+      const appUrl = process.env.APP_URL || 'http://localhost:3001';
+      const portalSession = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: `${appUrl}/dashboard/billing`,
+      });
+      res.json({ url: portalSession.url });
+    } catch (e: any) {
+      console.error('[stripe portal error]', e?.message);
+      res.status(500).json({ error: e?.message || 'Stripe error' });
+    }
+  });
+
+  // ─── Admin ────────────────────────────────────────────────────────────────
+  app.post('/api/admin/login', (req, res) => {
+    const { password } = req.body;
+    const adminPass = process.env.ADMIN_PASSWORD || 'admin123';
+    if (password !== adminPass) return res.status(401).json({ error: 'Invalid admin password' });
+    res.json({ token: 'admin-token' });
+  });
+
+  app.get('/api/admin/stats', adminAuth, (req, res) => {
+    const users = db.data.users;
+    const agents = db.data.agents.filter(a => a.is_active);
+    const today = new Date().toISOString().split('T')[0];
+    const thisMonth = new Date().toISOString().slice(0, 7);
+
+    const messagesToday = users.reduce((sum, u) => sum + (u.messages_reset_date === today ? u.messages_today : 0), 0);
+    const messagesThisMonth = db.data.messages.filter(m => m.created_at.startsWith(thisMonth) && m.role === 'user').length;
+
+    const planBreakdown = { free: 0, pro: 0, business: 0 };
+    users.forEach(u => { const p = u.plan as keyof typeof planBreakdown; if (p in planBreakdown) planBreakdown[p]++; });
+
+    const recentUsers = [...users].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 10).map(u => ({
+      id: u.id, email: u.email, plan: u.plan,
+      agentCount: agents.filter(a => a.user_id === u.id).length,
+      messages_today: u.messages_reset_date === today ? u.messages_today : 0,
+      created_at: u.created_at,
+    }));
+
+    const apiKeyStatus = {
+      anthropic: !!process.env.ANTHROPIC_API_KEY,
+      openai: !!process.env.OPENAI_API_KEY,
+      gemini: !!process.env.GEMINI_API_KEY,
+    };
+
+    res.json({ totalUsers: users.length, totalAgents: agents.length, messagesToday, messagesThisMonth, planBreakdown, recentUsers, apiKeyStatus });
+  });
+
+  app.get('/api/admin/users', adminAuth, (_req, res) => {
+    const today = new Date().toISOString().split('T')[0];
+    res.json(db.data.users.map(u => ({
+      id: u.id, email: u.email, username: u.username, plan: u.plan,
+      agentCount: db.data.agents.filter(a => a.user_id === u.id && a.is_active).length,
+      messages_today: u.messages_reset_date === today ? u.messages_today : 0,
+      created_at: u.created_at,
+    })));
+  });
+
+  app.patch('/api/admin/users/:id', adminAuth, (req, res) => {
+    const user = findUser(req.params.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const { plan } = req.body;
+    if (!plan || !['free', 'pro', 'business'].includes(plan)) return res.status(400).json({ error: 'Invalid plan' });
+    user.plan = plan;
+    save();
+    res.json({ success: true, plan });
+  });
 
   // ─── Integrations ─────────────────────────────────────────────────────────
   if (!db.data.integrations) db.data.integrations = [];
@@ -349,7 +682,6 @@ async function startServer() {
     res.json(items.map(i => ({ id: i.id, type: i.type, connected: i.connected, bot_info: i.bot_info, agent_id: i.agent_id, created_at: i.created_at })));
   });
 
-  // Assign integration to an agent
   app.put('/api/integrations/:type/assign', auth, (req: any, res) => {
     const { type } = req.params;
     const { agentId } = req.body;
@@ -364,7 +696,6 @@ async function startServer() {
     res.json({ success: true, agent_id: intg.agent_id });
   });
 
-  // Integration status
   app.get('/api/integrations/:type/status', auth, async (req: any, res) => {
     const { type } = req.params;
     const intg = db.data.integrations.find(i => i.user_id === req.userId && i.type === type);
@@ -395,7 +726,6 @@ async function startServer() {
         const data: any = await r.json();
         if (!data.ok) return res.status(400).json({ error: 'Invalid bot token', details: data.description });
         bot_info = data.result.username;
-        // Register webhook if APP_URL is set
         const appUrl = process.env.APP_URL;
         if (appUrl && agentId) {
           const agent = findAgent(agentId, userId);
@@ -422,9 +752,8 @@ async function startServer() {
       if (type === 'discord') {
         const { botToken, guildId, channelId, agentId } = req.body;
         if (!botToken) return res.status(400).json({ error: 'botToken required' });
-        // Validate bot token via Discord API
         const dr = await fetch('https://discord.com/api/v10/users/@me', { headers: { Authorization: `Bot ${botToken}` } });
-        if (!dr.ok) return res.status(400).json({ error: 'Invalid Discord bot token. Make sure you are using the Bot Token, not the client secret.' });
+        if (!dr.ok) return res.status(400).json({ error: 'Invalid Discord bot token.' });
         const discordBot: any = await dr.json();
         bot_info = discordBot.username;
         const existing = db.data.integrations.find(i => i.user_id === userId && i.type === 'discord');
@@ -441,7 +770,7 @@ async function startServer() {
         const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}.json`, {
           headers: { Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}` },
         });
-        if (!r.ok) return res.status(400).json({ error: 'Invalid Twilio credentials. Check your Account SID and Auth Token.' });
+        if (!r.ok) return res.status(400).json({ error: 'Invalid Twilio credentials.' });
         const creds = encodeCredentials({ accountSid, authToken, phoneNumber });
         const existing = db.data.integrations.find(i => i.user_id === userId && i.type === 'sms');
         if (existing) { existing.credentials = creds; existing.connected = true; existing.bot_info = phoneNumber; if (agentId) existing.agent_id = agentId; }
@@ -475,7 +804,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Telegram webhook (no auth)
+  // ─── Telegram webhook (improved) ──────────────────────────────────────────
   app.post('/api/integrations/telegram/webhook/:agentId', async (req, res) => {
     const { agentId } = req.params;
     res.json({ ok: true }); // Respond immediately to Telegram
@@ -484,43 +813,62 @@ async function startServer() {
       const agent = db.data.agents.find(a => a.id === agentId && a.is_active);
       if (!agent) return;
 
-      // Support both private and group messages
       const msg = update?.message || update?.channel_post;
       if (!msg?.text) return;
-
-      // Ignore bot's own messages
       if (msg.from?.is_bot) return;
 
       const chatId = msg.chat?.id;
       if (!chatId) return;
 
-      // Find Telegram integration for this agent's owner
       const integration = db.data.integrations.find(i => i.user_id === agent.user_id && i.type === 'telegram' && i.connected);
       if (!integration) return;
       const { botToken } = decodeCredentials(integration.credentials);
       if (!botToken) return;
 
-      const history = [{ role: 'user', content: msg.text }];
-      const reply = await callAI(agent.provider, agent.model, agent.system_prompt, history);
+      const text = msg.text.trim();
 
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: reply, parse_mode: 'Markdown' }),
-      });
+      // Handle commands
+      if (text === '/start') {
+        const welcome = `👋 Hi! I'm ${agent.name}. How can I help you today?\n\nType /help to see available commands.`;
+        await sendTelegramMessage(botToken, chatId, welcome);
+        return;
+      }
+
+      if (text === '/help') {
+        const helpText = `🤖 *${agent.name}* Help\n\n/start — Start the conversation\n/help — Show this help\n\nJust send me a message and I'll respond!`;
+        await sendTelegramMessage(botToken, chatId, helpText);
+        return;
+      }
+
+      // Send typing indicator
+      await sendTelegramTyping(botToken, chatId);
+
+      // Get user for plan-based model selection
+      const agentOwner = findUser(agent.user_id);
+      const effectiveModel = agentOwner ? getEffectiveModel(agentOwner, agent.model) : agent.model;
+      const provider = effectiveModel.startsWith('gpt') ? 'openai' : effectiveModel.startsWith('gemini') ? 'google' : 'anthropic';
+
+      const history = [{ role: 'user', content: text }];
+      const { text: reply } = await callAI(provider, effectiveModel, agent.system_prompt, history);
+
+      // Handle delay if configured
+      if (agent.response_delay_ms && agent.response_delay_ms > 0) {
+        await new Promise(r => setTimeout(r, Math.min(agent.response_delay_ms!, 5000)));
+      }
+
+      await sendTelegramMessage(botToken, chatId, reply);
       agent.total_messages++;
       save();
     } catch (e) { console.error('[telegram webhook error]', e); }
   });
 
-  // Twilio inbound SMS webhook (no auth — called by Twilio)
+  // ─── Twilio SMS webhook ────────────────────────────────────────────────────
   app.post('/api/webhooks/sms/inbound', express.urlencoded({ extended: false }), async (req, res) => {
-    // Respond with empty TwiML to avoid Twilio errors
     res.type('text/xml').send('<Response></Response>');
     try {
       const { From, To, Body } = req.body;
       if (!Body || !To) return;
 
-      // Find integration by phone number
       const integrations = db.data.integrations.filter(i => i.type === 'sms' && i.connected);
       let matchedIntg: Integration | undefined;
       for (const intg of integrations) {
@@ -529,14 +877,13 @@ async function startServer() {
       }
       if (!matchedIntg) return;
 
-      // Find assigned agent
       const agentId = matchedIntg.agent_id;
       if (!agentId) return;
       const agent = db.data.agents.find(a => a.id === agentId && a.is_active);
       if (!agent) return;
 
       const history = [{ role: 'user', content: Body }];
-      const reply = await callAI(agent.provider, agent.model, agent.system_prompt, history);
+      const { text: reply } = await callAI(agent.provider, agent.model, agent.system_prompt, history);
 
       const { accountSid, authToken, phoneNumber } = decodeCredentials(matchedIntg.credentials);
       await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
@@ -552,7 +899,7 @@ async function startServer() {
     } catch (e) { console.error('[sms inbound error]', e); }
   });
 
-    // Serve frontend
+  // ─── Frontend ─────────────────────────────────────────────────────────────
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
@@ -566,11 +913,3 @@ async function startServer() {
 }
 
 startServer().catch(console.error);
-
-
-
-
-
-
-
-

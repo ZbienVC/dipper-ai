@@ -13,6 +13,7 @@ import Approvals from './pages/Approvals'
 import Analytics from './pages/Analytics'
 import Settings from './pages/Settings'
 import Billing from './pages/Billing'
+import Admin from './pages/Admin'
 
 function PrivateRoute({ children }: { children: ReactNode }) {
   try {
@@ -45,6 +46,8 @@ function App() {
         <Route path="/dashboard/analytics" element={<PrivateRoute><Analytics /></PrivateRoute>} />
         <Route path="/dashboard/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
         <Route path="/dashboard/billing" element={<PrivateRoute><Billing /></PrivateRoute>} />
+
+        <Route path="/admin" element={<Admin />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
