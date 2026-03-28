@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import {
   MessageSquare, BarChart2, Settings, BookOpen, Terminal,
   Plug, User, Activity, Edit3, Save, Circle, Send, Bot,
   Upload, Link2, FileText, Plus, X, Check, Loader2, Globe, Copy, ExternalLink, ToggleLeft, ToggleRight,
-  Users, Trash2, ChevronRight
+  Users, Trash2, ChevronRight, Search, Database, AlertCircle, RefreshCw
 } from 'lucide-react'
 
 const TABS = [
@@ -93,6 +93,24 @@ export default function AgentDetail() {
   const [clearAllConfirm, setClearAllConfirm] = useState(false)
   const [deleteMemConfirm, setDeleteMemConfirm] = useState<string | null>(null)
 
+  // Knowledge base state
+  const [knowledgeSources, setKnowledgeSources] = useState<any[]>([])
+  const [knowledgeTotalChars, setKnowledgeTotalChars] = useState(0)
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false)
+  const [showAddKnowledge, setShowAddKnowledge] = useState(false)
+  const [knowledgeTab, setKnowledgeTab] = useState<'text' | 'url' | 'faq'>('text')
+  const [kbName, setKbName] = useState('')
+  const [kbTextContent, setKbTextContent] = useState('')
+  const [kbUrl, setKbUrl] = useState('')
+  const [kbFaqs, setKbFaqs] = useState<{ question: string; answer: string }[]>([{ question: '', answer: '' }])
+  const [kbAdding, setKbAdding] = useState(false)
+  const [kbAddError, setKbAddError] = useState('')
+  const [kbDeleteConfirm, setKbDeleteConfirm] = useState<string | null>(null)
+  const [kbSearchSource, setKbSearchSource] = useState<any>(null)
+  const [kbSearchQuery, setKbSearchQuery] = useState('')
+  const [kbSearchResults, setKbSearchResults] = useState<any[]>([])
+  const [kbSearching, setKbSearching] = useState(false)
+
   useEffect(() => {
     const token = getToken()
     if (!token) return
@@ -125,6 +143,31 @@ export default function AgentDetail() {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, thinking])
   useEffect(() => { const tab = searchParams.get('tab'); if (tab) setActiveTab(tab) }, [searchParams])
+
+  // Load knowledge sources when knowledge tab is activated
+  const loadKnowledge = useCallback(() => {
+    if (!agent) return
+    const token = getToken()
+    if (!token) return
+    setKnowledgeLoading(true)
+    fetch(`/api/agents/${agent.id}/knowledge`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { sources: [], totalChars: 0 })
+      .then((d: any) => { setKnowledgeSources(d.sources || []); setKnowledgeTotalChars(d.totalChars || 0) })
+      .catch(() => {})
+      .finally(() => setKnowledgeLoading(false))
+  }, [agent?.id])
+
+  useEffect(() => {
+    if (activeTab === 'knowledge' && agent) loadKnowledge()
+  }, [activeTab, agent?.id])
+
+  // Poll for processing knowledge sources
+  useEffect(() => {
+    const hasProcessing = knowledgeSources.some(s => s.status === 'processing')
+    if (!hasProcessing) return
+    const interval = setInterval(loadKnowledge, 2000)
+    return () => clearInterval(interval)
+  }, [knowledgeSources, loadKnowledge])
 
   // Load memories when users tab is activated
   useEffect(() => {
@@ -388,31 +431,334 @@ export default function AgentDetail() {
     </div>
   )
 
-  const renderKnowledge = () => (
-    <div className="space-y-4">
-      <div onDragOver={e => { e.preventDefault(); setKnowledgeDragOver(true) }} onDragLeave={() => setKnowledgeDragOver(false)}
-        onDrop={e => { e.preventDefault(); setKnowledgeDragOver(false) }}
-        className={`bg-[#111118] border-2 border-dashed rounded-xl p-10 text-center transition-all ${knowledgeDragOver ? 'border-violet-500 bg-violet-500/10' : 'border-[#1e1e2e]'}`}>
-        <Upload size={28} className={`mx-auto mb-2 ${knowledgeDragOver ? 'text-violet-400' : 'text-slate-600'}`} />
-        <p className="font-semibold text-slate-300 text-sm mb-1">Drag & drop files here</p>
-        <p className="text-xs text-slate-600 mb-3">PDF, DOCX, TXT, CSV</p>
-        <button className="gradient-btn px-4 py-2 rounded-xl font-semibold text-xs flex items-center gap-1.5 mx-auto">
-          <Upload size={13} /> Browse Files
-        </button>
-      </div>
-      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4">
-        <h3 className="font-semibold text-white mb-3 text-sm flex items-center gap-2"><Link2 size={14} /> Add URL</h3>
-        <div className="flex gap-3">
-          <input type="url" value={urlInput} onChange={e => setUrlInput(e.target.value)} placeholder="https://your-website.com/docs" className={inputClass} />
-          <button className="gradient-btn px-4 py-2 rounded-xl font-semibold text-xs flex-shrink-0">Scrape</button>
+  const renderKnowledge = () => {
+    const CHAR_LIMIT = 50000
+    const usagePct = Math.min((knowledgeTotalChars / CHAR_LIMIT) * 100, 100)
+    const fmtNum = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+
+    const handleAddKnowledge = async () => {
+      setKbAddError('')
+      if (!kbName.trim()) { setKbAddError('Name is required'); return }
+      let content = ''
+      let type: 'text' | 'url' | 'faq' = knowledgeTab
+      if (knowledgeTab === 'text') {
+        if (!kbTextContent.trim()) { setKbAddError('Content is required'); return }
+        content = kbTextContent.trim()
+      } else if (knowledgeTab === 'url') {
+        if (!kbUrl.trim()) { setKbAddError('URL is required'); return }
+        content = kbUrl.trim()
+      } else {
+        const validFaqs = kbFaqs.filter(f => f.question.trim() && f.answer.trim())
+        if (validFaqs.length === 0) { setKbAddError('Add at least one Q&A pair'); return }
+        content = validFaqs.map(f => `Q: ${f.question.trim()}\nA: ${f.answer.trim()}`).join('\n\n')
+        type = 'faq'
+      }
+      const token = getToken()
+      if (!token) return
+      setKbAdding(true)
+      try {
+        const r = await fetch(`/api/agents/${id}/knowledge`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ name: kbName.trim(), type, content }),
+        })
+        const data = await r.json()
+        if (!r.ok) { setKbAddError(data.error || 'Failed to add source'); return }
+        setShowAddKnowledge(false)
+        setKbName(''); setKbTextContent(''); setKbUrl('')
+        setKbFaqs([{ question: '', answer: '' }])
+        loadKnowledge()
+      } catch {
+        setKbAddError('Network error')
+      } finally {
+        setKbAdding(false)
+      }
+    }
+
+    const handleDelete = async (sourceId: string) => {
+      const token = getToken()
+      if (!token) return
+      await fetch(`/api/agents/${id}/knowledge/${sourceId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      setKbDeleteConfirm(null)
+      loadKnowledge()
+    }
+
+    const handleSearch = async () => {
+      if (!kbSearchQuery.trim() || !kbSearchSource) return
+      const token = getToken()
+      if (!token) return
+      setKbSearching(true)
+      try {
+        const r = await fetch(`/api/agents/${id}/knowledge/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ query: kbSearchQuery }),
+        })
+        const data = await r.json()
+        setKbSearchResults(data.results || [])
+      } catch {
+        setKbSearchResults([])
+      } finally {
+        setKbSearching(false)
+      }
+    }
+
+    const typeBadge = (type: string) => {
+      const map: Record<string, { label: string; cls: string }> = {
+        text: { label: 'Text', cls: 'bg-blue-500/20 text-blue-400' },
+        url: { label: 'URL', cls: 'bg-emerald-500/20 text-emerald-400' },
+        faq: { label: 'FAQ', cls: 'bg-violet-500/20 text-violet-400' },
+      }
+      const t = map[type] || { label: type, cls: 'bg-slate-500/20 text-slate-400' }
+      return <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${t.cls}`}>{t.label}</span>
+    }
+
+    const statusBadge = (status: string) => {
+      if (status === 'ready') return <span className="flex items-center gap-1 text-xs text-emerald-400"><Check size={12} /> Ready</span>
+      if (status === 'processing') return <span className="flex items-center gap-1 text-xs text-amber-400"><Loader2 size={12} className="animate-spin" /> Processing</span>
+      return <span className="flex items-center gap-1 text-xs text-red-400"><AlertCircle size={12} /> Error</span>
+    }
+
+    return (
+      <div className="space-y-5">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2"><Database size={18} className="text-violet-400" /> Knowledge Base</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Give your agent specific knowledge to answer questions accurately.</p>
+          </div>
+          <button onClick={() => { setShowAddKnowledge(true); setKbAddError('') }}
+            className="gradient-btn flex items-center gap-1.5 px-4 py-2 rounded-xl font-semibold text-sm">
+            <Plus size={14} /> Add Source
+          </button>
         </div>
+
+        {/* Stats bar */}
+        <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between text-sm">
+            <div className="flex items-center gap-5">
+              <div><span className="text-slate-500">Sources</span> <span className="font-bold text-white ml-1">{knowledgeSources.length}</span></div>
+              <div><span className="text-slate-500">Characters</span> <span className="font-bold text-white ml-1">{fmtNum(knowledgeTotalChars)} / {fmtNum(CHAR_LIMIT)}</span></div>
+            </div>
+            <div className={`flex items-center gap-1.5 text-xs font-semibold ${knowledgeSources.some(s => s.status === 'ready') ? 'text-emerald-400' : 'text-slate-500'}`}>
+              <div className={`w-2 h-2 rounded-full ${knowledgeSources.some(s => s.status === 'ready') ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+              Knowledge {knowledgeSources.some(s => s.status === 'ready') ? 'Enabled' : 'Inactive'}
+            </div>
+          </div>
+          <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+            <div className={`h-full rounded-full transition-all ${usagePct > 90 ? 'bg-red-500' : usagePct > 70 ? 'bg-amber-500' : 'bg-violet-500'}`}
+              style={{ width: `${usagePct}%` }} />
+          </div>
+          <p className="text-xs text-slate-600">{CHAR_LIMIT - knowledgeTotalChars > 0 ? `${fmtNum(CHAR_LIMIT - knowledgeTotalChars)} characters remaining` : 'Limit reached'}</p>
+        </div>
+
+        {/* Source list */}
+        {knowledgeLoading && knowledgeSources.length === 0 ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 size={24} className="animate-spin text-violet-400" />
+          </div>
+        ) : knowledgeSources.length === 0 ? (
+          <div className="bg-[#111118] border border-dashed border-[#1e1e2e] rounded-xl p-12 text-center">
+            <BookOpen size={32} className="text-slate-700 mx-auto mb-3" />
+            <p className="font-semibold text-slate-400 mb-1">No knowledge sources yet</p>
+            <p className="text-sm text-slate-600">Add documents, URLs, or FAQs to make your agent smarter.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {knowledgeSources.map(source => (
+              <div key={source.id} className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-white text-sm truncate">{source.name}</span>
+                      {typeBadge(source.type)}
+                      {statusBadge(source.status)}
+                    </div>
+                    {source.status === 'error' && source.error_message && (
+                      <p className="text-xs text-red-400 mt-1">{source.error_message}</p>
+                    )}
+                    <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-600">
+                      <span>{fmtNum(source.char_count)} chars</span>
+                      <span>·</span>
+                      <span>{source.chunk_count} chunks</span>
+                      <span>·</span>
+                      <span>{new Date(source.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {source.status === 'ready' && (
+                      <button onClick={() => { setKbSearchSource(source); setKbSearchQuery(''); setKbSearchResults([]) }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#1e1e2e] text-slate-400 hover:bg-white/5 hover:text-white transition-all">
+                        <Search size={12} /> Test
+                      </button>
+                    )}
+                    {kbDeleteConfirm === source.id ? (
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => handleDelete(source.id)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all">
+                          Confirm
+                        </button>
+                        <button onClick={() => setKbDeleteConfirm(null)}
+                          className="px-2 py-1.5 rounded-lg text-xs border border-[#1e1e2e] text-slate-500 hover:bg-white/5 transition-all">
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setKbDeleteConfirm(source.id)}
+                        className="p-1.5 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-all">
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Add Source Modal */}
+        {showAddKnowledge && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={e => { if (e.target === e.currentTarget) setShowAddKnowledge(false) }}>
+            <div className="bg-[#0d0d16] border border-[#1e1e2e] rounded-2xl w-full max-w-lg shadow-2xl">
+              <div className="flex items-center justify-between p-5 border-b border-[#1e1e2e]">
+                <h3 className="font-bold text-white text-base flex items-center gap-2"><BookOpen size={16} className="text-violet-400" /> Add Knowledge Source</h3>
+                <button onClick={() => setShowAddKnowledge(false)} className="text-slate-500 hover:text-white"><X size={18} /></button>
+              </div>
+
+              {/* Type tabs */}
+              <div className="flex gap-1 p-4 pb-0">
+                {(['text', 'url', 'faq'] as const).map(t => (
+                  <button key={t} onClick={() => setKnowledgeTab(t)}
+                    className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${knowledgeTab === t ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>
+                    {t === 'text' ? '📝 Paste Text' : t === 'url' ? '🔗 Add URL' : '❓ FAQ Builder'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="p-5 space-y-4">
+                {/* Name */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Source Name</label>
+                  <input value={kbName} onChange={e => setKbName(e.target.value)} placeholder="e.g. Product Documentation"
+                    className={inputClass} />
+                </div>
+
+                {/* Text tab */}
+                {knowledgeTab === 'text' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Content</label>
+                    <textarea value={kbTextContent} onChange={e => setKbTextContent(e.target.value)}
+                      placeholder="Paste any text content here — documentation, FAQs, product info, policies..."
+                      rows={8} className={`${inputClass} resize-none leading-relaxed`} />
+                    <p className="text-xs text-slate-600 mt-1">{kbTextContent.length.toLocaleString()} characters</p>
+                  </div>
+                )}
+
+                {/* URL tab */}
+                {knowledgeTab === 'url' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">URL to fetch</label>
+                    <input value={kbUrl} onChange={e => setKbUrl(e.target.value)}
+                      placeholder="https://example.com/docs/page" type="url" className={inputClass} />
+                    <p className="text-xs text-slate-600 mt-1.5">The page will be fetched and indexed automatically. Some pages may block scraping.</p>
+                  </div>
+                )}
+
+                {/* FAQ tab */}
+                {knowledgeTab === 'faq' && (
+                  <div className="space-y-3">
+                    <label className="block text-xs font-semibold text-slate-400">Questions & Answers</label>
+                    {kbFaqs.map((faq, i) => (
+                      <div key={i} className="bg-white/3 border border-[#1e1e2e] rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-500">#{i + 1}</span>
+                          {kbFaqs.length > 1 && (
+                            <button onClick={() => setKbFaqs(prev => prev.filter((_, idx) => idx !== i))}
+                              className="text-slate-600 hover:text-red-400 transition-colors"><X size={12} /></button>
+                          )}
+                        </div>
+                        <input value={faq.question} onChange={e => setKbFaqs(prev => prev.map((f, idx) => idx === i ? { ...f, question: e.target.value } : f))}
+                          placeholder="Question" className={inputClass} />
+                        <textarea value={faq.answer} onChange={e => setKbFaqs(prev => prev.map((f, idx) => idx === i ? { ...f, answer: e.target.value } : f))}
+                          placeholder="Answer" rows={2} className={`${inputClass} resize-none`} />
+                      </div>
+                    ))}
+                    <button onClick={() => setKbFaqs(prev => [...prev, { question: '', answer: '' }])}
+                      className="flex items-center gap-1.5 text-xs font-semibold text-violet-400 hover:text-violet-300 transition-colors">
+                      <Plus size={12} /> Add Row
+                    </button>
+                  </div>
+                )}
+
+                {kbAddError && (
+                  <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 rounded-lg px-3 py-2">
+                    <AlertCircle size={14} /> {kbAddError}
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-1">
+                  <button onClick={handleAddKnowledge} disabled={kbAdding}
+                    className="flex-1 gradient-btn py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-60">
+                    {kbAdding ? <><Loader2 size={14} className="animate-spin" /> {knowledgeTab === 'url' ? 'Fetching...' : 'Adding...'}</> : <><Check size={14} /> Add to Knowledge Base</>}
+                  </button>
+                  <button onClick={() => setShowAddKnowledge(false)}
+                    className="px-4 py-2.5 rounded-xl text-sm font-semibold border border-[#1e1e2e] text-slate-400 hover:bg-white/5 transition-all">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Test Search Modal */}
+        {kbSearchSource && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={e => { if (e.target === e.currentTarget) { setKbSearchSource(null); setKbSearchResults([]) } }}>
+            <div className="bg-[#0d0d16] border border-[#1e1e2e] rounded-2xl w-full max-w-lg shadow-2xl">
+              <div className="flex items-center justify-between p-5 border-b border-[#1e1e2e]">
+                <h3 className="font-bold text-white text-base flex items-center gap-2"><Search size={16} className="text-violet-400" /> Test Knowledge Search</h3>
+                <button onClick={() => { setKbSearchSource(null); setKbSearchResults([]) }} className="text-slate-500 hover:text-white"><X size={18} /></button>
+              </div>
+              <div className="p-5 space-y-4">
+                <p className="text-xs text-slate-500">Type a query to see which chunks would be retrieved for the AI context.</p>
+                <div className="flex gap-2">
+                  <input value={kbSearchQuery} onChange={e => setKbSearchQuery(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                    placeholder="Type a question..." className={`${inputClass} flex-1`} />
+                  <button onClick={handleSearch} disabled={kbSearching || !kbSearchQuery.trim()}
+                    className="gradient-btn px-4 py-2 rounded-xl font-semibold text-sm flex items-center gap-1.5 disabled:opacity-50">
+                    {kbSearching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+                  </button>
+                </div>
+                {kbSearchResults.length > 0 && (
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold text-slate-400">Top {kbSearchResults.length} matching chunks:</p>
+                    {kbSearchResults.map((result, i) => (
+                      <div key={i} className="bg-white/5 border border-[#1e1e2e] rounded-xl p-3 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-violet-400">Match #{i + 1}</span>
+                          <span className="text-xs text-slate-500">Score: {result.score}</span>
+                        </div>
+                        <p className="text-xs text-slate-300 leading-relaxed">{result.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {kbSearchResults.length === 0 && kbSearchQuery && !kbSearching && (
+                  <p className="text-xs text-slate-600 text-center py-4">No matching chunks found. Try different keywords.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4">
-        <h3 className="font-semibold text-white mb-3 text-sm flex items-center gap-2"><FileText size={14} /> Knowledge Sources</h3>
-        <p className="text-xs text-slate-600">No knowledge sources added yet.</p>
-      </div>
-    </div>
-  )
+    )
+  }
 
   const renderCommands = () => (
     <div className="space-y-3">

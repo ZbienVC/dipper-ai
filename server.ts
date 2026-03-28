@@ -122,6 +122,22 @@ type AutomationRun = {
   completed_at?: string;
 };
 
+type KnowledgeSource = {
+  id: string;
+  agent_id: string;
+  user_id: string;
+  name: string;
+  type: 'text' | 'url' | 'faq';
+  content: string;
+  chunks: string[];
+  status: 'ready' | 'processing' | 'error';
+  char_count: number;
+  chunk_count: number;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+};
+
 type DBSchema = {
   users: User[]; agents: Agent[]; conversations: Conversation[];
   messages: Message[]; integrations: Integration[];
@@ -130,6 +146,7 @@ type DBSchema = {
   user_memories: UserMemory[];
   automations: Automation[];
   automation_runs: AutomationRun[];
+  knowledge_sources: KnowledgeSource[];
 };
 
 // ─── Plan Definitions ─────────────────────────────────────────────────────────
@@ -388,6 +405,65 @@ function buildMemoryContext(agentId: string, userIdentifier: string, channel: st
   return lines.join('\n');
 }
 
+// ─── Knowledge Base Helpers ───────────────────────────────────────────────────
+
+function chunkText(text: string, chunkSize = 500, overlap = 50): string[] {
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    chunks.push(text.slice(start, start + chunkSize));
+    start += chunkSize - overlap;
+  }
+  return chunks;
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function retrieveRelevantChunks(agentId: string, query: string, topK: number = 3): string[] {
+  if (!db?.data?.knowledge_sources) return [];
+  const sources = db.data.knowledge_sources.filter(s => s.agent_id === agentId && s.status === 'ready');
+  if (sources.length === 0) return [];
+
+  const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+  if (queryWords.length === 0) return [];
+
+  const allChunks: { text: string; score: number }[] = [];
+
+  for (const source of sources) {
+    for (const chunk of source.chunks) {
+      const chunkLower = chunk.toLowerCase();
+      const score = queryWords.reduce((s, word) => {
+        const count = (chunkLower.match(new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+        return s + count;
+      }, 0);
+      if (score > 0) allChunks.push({ text: chunk, score });
+    }
+  }
+
+  return allChunks
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+    .map(c => c.text);
+}
+
+function buildKnowledgeContext(agentId: string, query: string): string {
+  const chunks = retrieveRelevantChunks(agentId, query, 3);
+  if (chunks.length === 0) return '';
+  return `=== Relevant Knowledge ===\n${chunks.join('\n\n')}\n=== End Knowledge ===`;
+}
+
 // ─── Automation Helpers ───────────────────────────────────────────────────────
 
 function getNextRunAt(cronExpression: string, timezone?: string): string {
@@ -608,7 +684,7 @@ async function startServer() {
   try {
     const { JSONFileSync } = await import('lowdb/node');
     const adapter = new JSONFileSync<DBSchema>(dbPath);
-    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [] });
+    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [] });
     try { db.read(); } catch { /* fresh */ }
     if (!db.data.scheduled_messages) db.data.scheduled_messages = [];
     if (!db.data.activity_logs) db.data.activity_logs = [];
@@ -620,7 +696,7 @@ async function startServer() {
   } catch {
     console.warn('[DipperAI] Read-only filesystem, using in-memory DB');
     const { MemorySync } = await import('lowdb');
-    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [] });
+    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [] });
   }
 
   startCronRunner();
@@ -793,7 +869,9 @@ async function startServer() {
     const startTime = Date.now();
     try {
       const memoryContext = buildMemoryContext(agent.id, req.userId, 'web');
-      const systemPromptWithMemory = memoryContext ? `${memoryContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const knowledgeContext = buildKnowledgeContext(agent.id, message);
+      const basePrompt = knowledgeContext ? `${knowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const systemPromptWithMemory = memoryContext ? `${memoryContext}\n\n${basePrompt}` : basePrompt;
       const { text: content, tokensUsed } = await callAI(activeProvider, effectiveModel, systemPromptWithMemory, history, plan.maxTokens);
       const latency_ms = Date.now() - startTime;
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
@@ -1218,7 +1296,9 @@ async function startServer() {
 
       const telegramUserId = String(msg.from?.id || chatId);
       const memoryContext = buildMemoryContext(agent.id, telegramUserId, 'telegram');
-      const systemPromptWithMemory = memoryContext ? `${memoryContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const tgKnowledgeContext = buildKnowledgeContext(agent.id, text);
+      const tgBasePrompt = tgKnowledgeContext ? `${tgKnowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const systemPromptWithMemory = memoryContext ? `${memoryContext}\n\n${tgBasePrompt}` : tgBasePrompt;
 
       const history = [{ role: 'user', content: text }];
       const { text: reply } = await callAI(provider, effectiveModel, systemPromptWithMemory, history);
@@ -1259,7 +1339,9 @@ async function startServer() {
 
       const history = [{ role: 'user', content: Body }];
       const smsMemoryContext = buildMemoryContext(agent.id, From, 'sms');
-      const smsSystemPrompt = smsMemoryContext ? `${smsMemoryContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const smsKnowledgeContext = buildKnowledgeContext(agent.id, Body);
+      const smsBasePrompt = smsKnowledgeContext ? `${smsKnowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const smsSystemPrompt = smsMemoryContext ? `${smsMemoryContext}\n\n${smsBasePrompt}` : smsBasePrompt;
       const { text: reply } = await callAI(agent.provider, agent.model, smsSystemPrompt, history);
 
       const { accountSid, authToken, phoneNumber } = decodeCredentials(matchedIntg.credentials);
@@ -1393,7 +1475,9 @@ async function startServer() {
     try {
       const embedUserId = `embed_${conversationId || convId}`;
       const embedMemoryContext = buildMemoryContext(agent.id, embedUserId, 'web');
-      const embedSystemPrompt = embedMemoryContext ? `${embedMemoryContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const embedKnowledgeContext = buildKnowledgeContext(agent.id, message);
+      const embedBasePrompt = embedKnowledgeContext ? `${embedKnowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const embedSystemPrompt = embedMemoryContext ? `${embedMemoryContext}\n\n${embedBasePrompt}` : embedBasePrompt;
       const { text: content, tokensUsed } = await callAI(agent.provider, agent.model, embedSystemPrompt, history, 1024);
       const latency_ms = Date.now() - startTime;
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
@@ -1422,6 +1506,137 @@ async function startServer() {
     agent.updated_at = new Date().toISOString();
     save();
     res.json(agent);
+  });
+
+  // ─── Knowledge Base Routes ────────────────────────────────────────────────
+
+  // GET /api/agents/:id/knowledge
+  app.get('/api/agents/:id/knowledge', auth, (req: any, res) => {
+    if (!db.data.knowledge_sources) db.data.knowledge_sources = [];
+    const agent = db.data.agents.find(a => a.id === req.params.id && a.user_id === req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const sources = db.data.knowledge_sources.filter(s => s.agent_id === req.params.id);
+    const totalChars = sources.reduce((sum, s) => sum + s.char_count, 0);
+    res.json({ sources, totalChars, limit: 50000 });
+  });
+
+  // POST /api/agents/:id/knowledge
+  app.post('/api/agents/:id/knowledge', auth, async (req: any, res) => {
+    if (!db.data.knowledge_sources) db.data.knowledge_sources = [];
+    const agent = db.data.agents.find(a => a.id === req.params.id && a.user_id === req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+
+    const { name, type, content } = req.body;
+    if (!name || !type || !content) return res.status(400).json({ error: 'name, type, and content are required' });
+    if (!['text', 'url', 'faq'].includes(type)) return res.status(400).json({ error: 'type must be text, url, or faq' });
+
+    // Check total char limit
+    const existingSources = db.data.knowledge_sources.filter(s => s.agent_id === req.params.id);
+    const existingChars = existingSources.reduce((sum, s) => sum + s.char_count, 0);
+
+    const sourceId = randomUUID();
+    const now = new Date().toISOString();
+
+    // Create placeholder
+    const newSource: KnowledgeSource = {
+      id: sourceId,
+      agent_id: req.params.id,
+      user_id: req.userId,
+      name,
+      type,
+      content: '',
+      chunks: [],
+      status: 'processing',
+      char_count: 0,
+      chunk_count: 0,
+      created_at: now,
+      updated_at: now,
+    };
+    db.data.knowledge_sources.push(newSource);
+    save();
+    res.json(newSource);
+
+    // Process async
+    (async () => {
+      try {
+        let textContent = content;
+
+        if (type === 'url') {
+          const resp = await fetch(content, { signal: AbortSignal.timeout(15000) });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const html = await resp.text();
+          textContent = stripHtml(html);
+        }
+
+        if (textContent.length > 100000) textContent = textContent.slice(0, 100000);
+
+        // Check limit
+        if (existingChars + textContent.length > 50000) {
+          const allowed = 50000 - existingChars;
+          if (allowed <= 0) throw new Error('Knowledge base limit reached (50,000 characters)');
+          textContent = textContent.slice(0, allowed);
+        }
+
+        const chunks = chunkText(textContent, 500, 50);
+        const src = db.data.knowledge_sources.find(s => s.id === sourceId);
+        if (src) {
+          src.content = textContent;
+          src.chunks = chunks;
+          src.status = 'ready';
+          src.char_count = textContent.length;
+          src.chunk_count = chunks.length;
+          src.updated_at = new Date().toISOString();
+          save();
+        }
+      } catch (err: any) {
+        const src = db.data.knowledge_sources.find(s => s.id === sourceId);
+        if (src) {
+          src.status = 'error';
+          src.error_message = err.message || 'Processing failed';
+          src.updated_at = new Date().toISOString();
+          save();
+        }
+      }
+    })();
+  });
+
+  // DELETE /api/agents/:id/knowledge/:sourceId
+  app.delete('/api/agents/:id/knowledge/:sourceId', auth, (req: any, res) => {
+    if (!db.data.knowledge_sources) db.data.knowledge_sources = [];
+    const agent = db.data.agents.find(a => a.id === req.params.id && a.user_id === req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const idx = db.data.knowledge_sources.findIndex(s => s.id === req.params.sourceId && s.agent_id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Source not found' });
+    db.data.knowledge_sources.splice(idx, 1);
+    save();
+    res.json({ success: true });
+  });
+
+  // POST /api/agents/:id/knowledge/search
+  app.post('/api/agents/:id/knowledge/search', auth, (req: any, res) => {
+    if (!db.data.knowledge_sources) db.data.knowledge_sources = [];
+    const agent = db.data.agents.find(a => a.id === req.params.id && a.user_id === req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ error: 'query is required' });
+
+    const sources = db.data.knowledge_sources.filter(s => s.agent_id === req.params.id && s.status === 'ready');
+    const queryWords = query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+
+    const allChunks: { text: string; score: number; sourceName: string }[] = [];
+    for (const source of sources) {
+      for (const chunk of source.chunks) {
+        const chunkLower = chunk.toLowerCase();
+        const score = queryWords.reduce((s: number, word: string) => {
+          const count = (chunkLower.match(new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+          return s + count;
+        }, 0);
+        if (score > 0) allChunks.push({ text: chunk, score, sourceName: source.name });
+      }
+    }
+
+    const results = allChunks.sort((a, b) => b.score - a.score).slice(0, 3);
+    res.json({ results, queryWords });
   });
 
   // ─── Automation Routes ────────────────────────────────────────────────────
