@@ -78,7 +78,7 @@ export default function AgentDetail() {
   const [editTone, setEditTone] = useState('')
   const [editCommStyle, setEditCommStyle] = useState('')
   const [saved, setSaved] = useState(false)
-  const [selectedModel, setSelectedModel] = useState('claude-3-5-haiku-20241022')
+  const [selectedModel, setSelectedModel] = useState('claude-haiku-4-5')
   const [editAdjectives, setEditAdjectives] = useState('Helpful, Professional, Concise')
   const [editTopics, setEditTopics] = useState('')
   const [editForbiddenWords, setEditForbiddenWords] = useState('')
@@ -221,7 +221,7 @@ export default function AgentDetail() {
           className="text-xs bg-white/5 border border-[#1e1e2e] text-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-violet-500/50">
           <option value="gemini-1.5-flash">Gemini Flash</option>
           <option value="gemini-1.5-pro">Gemini Pro</option>
-          <option value="claude-3-5-haiku-20241022">Claude Haiku</option>
+          <option value="claude-haiku-4-5">Claude Haiku</option>
           <option value="gpt-4o-mini">GPT-4o Mini</option>
         </select>
       </div>
@@ -315,8 +315,8 @@ export default function AgentDetail() {
             <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
           </optgroup>
           <optgroup label="Anthropic">
-            <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
-            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+            <option value="claude-haiku-4-5">Claude 3.5 Haiku</option>
+            <option value="claude-sonnet-4-5">Claude 3.5 Sonnet</option>
           </optgroup>
           <optgroup label="OpenAI">
             <option value="gpt-4o">GPT-4o</option>
@@ -513,5 +513,6 @@ export default function AgentDetail() {
     </DashboardLayout>
   )
 }
+
 
 

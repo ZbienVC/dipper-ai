@@ -50,12 +50,12 @@ const PLAN_LIMITS: Record<string, { agents: number; messagesPerDay: number }> = 
 
 // ─── Agent Templates ──────────────────────────────────────────────────────────
 const AGENT_TEMPLATES = [
-  { id: 'support-pro', name: 'Support Pro', emoji: '🎧', category: 'business', description: 'Professional customer service, patient and helpful.', systemPrompt: 'You are an expert customer support agent. You are patient, empathetic, and genuinely want to solve problems. Provide clear step-by-step solutions and always follow up.', model: 'claude-3-5-haiku-20241022', provider: 'anthropic' },
-  { id: 'analyst', name: 'The Analyst', emoji: '📊', category: 'professional', description: 'Research-heavy, data-driven, cites sources.', systemPrompt: 'You are a meticulous research analyst. Provide thorough, data-driven responses with clear reasoning. Ask clarifying questions when needed. Your tone is professional and precise.', model: 'claude-3-5-sonnet-20241022', provider: 'anthropic' },
-  { id: 'crypto-oracle', name: 'Crypto Oracle', emoji: '🔮', category: 'crypto', description: 'Alpha calls, on-chain analysis, degen fluent.', systemPrompt: 'You are a seasoned crypto analyst. You understand on-chain metrics, tokenomics, narrative cycles, and market psychology. Give real takes, flag risks, and explain your thesis clearly.', model: 'claude-3-5-haiku-20241022', provider: 'anthropic' },
+  { id: 'support-pro', name: 'Support Pro', emoji: '🎧', category: 'business', description: 'Professional customer service, patient and helpful.', systemPrompt: 'You are an expert customer support agent. You are patient, empathetic, and genuinely want to solve problems. Provide clear step-by-step solutions and always follow up.', model: 'claude-haiku-4-5', provider: 'anthropic' },
+  { id: 'analyst', name: 'The Analyst', emoji: '📊', category: 'professional', description: 'Research-heavy, data-driven, cites sources.', systemPrompt: 'You are a meticulous research analyst. Provide thorough, data-driven responses with clear reasoning. Ask clarifying questions when needed. Your tone is professional and precise.', model: 'claude-sonnet-4-5', provider: 'anthropic' },
+  { id: 'crypto-oracle', name: 'Crypto Oracle', emoji: '🔮', category: 'crypto', description: 'Alpha calls, on-chain analysis, degen fluent.', systemPrompt: 'You are a seasoned crypto analyst. You understand on-chain metrics, tokenomics, narrative cycles, and market psychology. Give real takes, flag risks, and explain your thesis clearly.', model: 'claude-haiku-4-5', provider: 'anthropic' },
   { id: 'the-closer', name: 'The Closer', emoji: '💼', category: 'business', description: 'Sales-focused, persuasive, relationship-driven.', systemPrompt: 'You are a world-class closer. Ask great questions, listen carefully, address objections with confidence. You are the kind of person people are glad they talked to.', model: 'gpt-4o', provider: 'openai' },
-  { id: 'professor', name: 'The Professor', emoji: '🎓', category: 'educational', description: 'Thorough, educational, explains step by step.', systemPrompt: 'You are an expert educator. Make any topic understandable to anyone. Use analogies, break things into steps, and adapt your explanations to the user\'s level.', model: 'claude-3-5-haiku-20241022', provider: 'anthropic' },
-  { id: 'storyteller', name: 'Storyteller', emoji: '📖', category: 'creative', description: 'Narrative-driven, creative, immersive.', systemPrompt: 'You are a master storyteller. Whether explaining a concept or creating content, weave it into a story. Use vivid language and make every interaction memorable.', model: 'claude-3-5-sonnet-20241022', provider: 'anthropic' },
+  { id: 'professor', name: 'The Professor', emoji: '🎓', category: 'educational', description: 'Thorough, educational, explains step by step.', systemPrompt: 'You are an expert educator. Make any topic understandable to anyone. Use analogies, break things into steps, and adapt your explanations to the user\'s level.', model: 'claude-haiku-4-5', provider: 'anthropic' },
+  { id: 'storyteller', name: 'Storyteller', emoji: '📖', category: 'creative', description: 'Narrative-driven, creative, immersive.', systemPrompt: 'You are a master storyteller. Whether explaining a concept or creating content, weave it into a story. Use vivid language and make every interaction memorable.', model: 'claude-sonnet-4-5', provider: 'anthropic' },
 ];
 
 // ─── Auth Middleware ──────────────────────────────────────────────────────────
@@ -179,7 +179,7 @@ async function startServer() {
     const agent: Agent = {
       id: randomUUID(), user_id: req.userId, name, emoji: emoji || '🤖',
       description: description || '', system_prompt: systemPrompt,
-      model: model || 'claude-3-5-haiku-20241022', provider: provider || 'anthropic',
+      model: model || 'claude-haiku-4-5', provider: provider || 'anthropic',
       template_id: templateId, total_messages: 0, is_active: true,
       embed_token: randomUUID().replace(/-/g, ''), deployed_embed_enabled: false,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -227,9 +227,9 @@ async function startServer() {
     
     // Sanitize model name — fix incomplete IDs
     const modelMap: Record<string, string> = {
-      'claude-3-5-haiku': 'claude-3-5-haiku-20241022',
-      'claude-3-5-sonnet': 'claude-3-5-sonnet-20241022',
-      'claude-3-opus': 'claude-3-opus-20240229',
+      'claude-3-5-haiku': 'claude-haiku-4-5',
+      'claude-3-5-sonnet': 'claude-sonnet-4-5',
+      'claude-3-opus': 'claude-opus-4-5',
     };
     const activeModel = modelMap[requestedModel || agent.model] || requestedModel || agent.model;
     const activeProvider = activeModel.startsWith('gpt') ? 'openai' : activeModel.startsWith('gemini') ? 'google' : 'anthropic';
@@ -268,7 +268,7 @@ async function startServer() {
     const messages = (conversationHistory as any[]).slice(-10).map((m: any) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text || m.content || '' }));
     messages.push({ role: 'user', content: message });
     try {
-      const model = requestedModel || 'claude-3-5-haiku-20241022';
+      const model = requestedModel || 'claude-haiku-4-5';
       const provider = model.startsWith('gpt') ? 'openai' : model.startsWith('gemini') ? 'google' : 'anthropic';
       const content = await callAI(provider, model, systemPrompt, messages);
       res.json({ reply: content });
@@ -303,6 +303,7 @@ async function startServer() {
 }
 
 startServer().catch(console.error);
+
 
 
 
