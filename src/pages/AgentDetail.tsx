@@ -4,7 +4,7 @@ import DashboardLayout from '../components/DashboardLayout'
 import {
   MessageSquare, BarChart2, Settings, BookOpen, Terminal,
   Plug, User, Activity, Edit3, Save, Circle, Send, Bot,
-  Upload, Link2, FileText, Plus, X, Check, ToggleLeft, ToggleRight
+  Upload, Link2, FileText, Plus, X, Check
 } from 'lucide-react'
 
 const MOCK_AGENTS: Record<string, {
@@ -95,7 +95,16 @@ export default function AgentDetail() {
   const [showAddCommand, setShowAddCommand] = useState(false)
   const [newTrigger, setNewTrigger] = useState('')
   const [newResponse, setNewResponse] = useState('')
-  const [integrationToggles, setIntegrationToggles] = useState<Record<string, boolean>>({ sms: false, telegram: true, twitter: false, discord: false })
+  const [integrationRecords, setIntegrationRecords] = useState<{ type: string; connected: boolean; bot_info?: string }[]>([])
+
+  useEffect(() => {
+    const token = (() => { try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null } })()
+    if (!token) return
+    fetch('/api/integrations', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then((d: any[]) => setIntegrationRecords(d))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (agent) {
@@ -413,33 +422,47 @@ export default function AgentDetail() {
     </div>
   )
 
-  const renderAgentIntegrations = () => (
-    <div className="space-y-3">
-      <p className="text-sm text-slate-500">Enable or disable integrations for this agent.</p>
-      {[
-        { id: 'sms', name: 'SMS / Twilio', desc: 'Send and receive SMS messages' },
-        { id: 'telegram', name: 'Telegram', desc: 'Deploy as a Telegram bot' },
-        { id: 'twitter', name: 'X / Twitter', desc: 'Auto-respond to mentions and DMs' },
-        { id: 'discord', name: 'Discord', desc: 'Engage your Discord community' },
-      ].map(intg => (
-        <div key={intg.id} className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/5 border border-[#1e1e2e] flex items-center justify-center">
-              <Plug size={16} className={integrationToggles[intg.id] ? 'text-violet-400' : 'text-slate-600'} />
-            </div>
-            <div>
-              <p className="font-semibold text-white text-sm">{intg.name}</p>
-              <p className="text-xs text-slate-500">{intg.desc}</p>
-            </div>
-          </div>
-          <button onClick={() => setIntegrationToggles(prev => ({ ...prev, [intg.id]: !prev[intg.id] }))}
-            className={`transition-colors ${integrationToggles[intg.id] ? 'text-violet-400' : 'text-slate-600'}`}>
-            {integrationToggles[intg.id] ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
-          </button>
+  const renderAgentIntegrations = () => {
+    const intgList = [
+      { id: 'telegram', name: 'Telegram', desc: 'Deploy as a Telegram bot', icon: '✈️' },
+      { id: 'discord', name: 'Discord', desc: 'Engage your Discord community', icon: '🎮' },
+      { id: 'sms', name: 'SMS / Twilio', desc: 'Send and receive SMS messages', icon: '📱' },
+      { id: 'twitter', name: 'X / Twitter', desc: 'Auto-respond to mentions and DMs', icon: '🐦' },
+    ]
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-sm text-slate-500">Integrations connected to this agent.</p>
+          <a href="/integrations" className="text-xs text-violet-400 hover:text-violet-300 underline underline-offset-2 flex items-center gap-1">
+            <Plug size={11} /> Add Integration
+          </a>
         </div>
-      ))}
-    </div>
-  )
+        {intgList.map(intg => {
+          const rec = integrationRecords.find(r => r.type === intg.id)
+          return (
+            <div key={intg.id} className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/5 border border-[#1e1e2e] flex items-center justify-center text-base">
+                  {intg.icon}
+                </div>
+                <div>
+                  <p className="font-semibold text-white text-sm">{intg.name}</p>
+                  <p className="text-xs text-slate-500">{rec?.connected ? (rec.bot_info ? `@${rec.bot_info}` : 'Connected') : intg.desc}</p>
+                </div>
+              </div>
+              {rec?.connected ? (
+                <span className="flex items-center gap-1 text-xs bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-1 rounded-full">
+                  <Check size={10} /> Live
+                </span>
+              ) : (
+                <span className="text-xs text-slate-600 px-2 py-1">Not connected</span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
 
   const renderEmptyTab = (tab: string) => (
     <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-16 text-center">

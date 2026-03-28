@@ -32,12 +32,17 @@ type Agent = {
 };
 type Message = { id: string; conversation_id: string; role: string; content: string; model_used?: string; created_at: string; };
 type Conversation = { id: string; agent_id: string; user_id?: string; channel: string; message_count: number; created_at: string; };
+type Integration = {
+  id: string; user_id: string; type: string;
+  credentials: Record<string, string>;
+  connected: boolean; bot_info?: string; created_at: string;
+};
 
-type DBSchema = { users: User[]; agents: Agent[]; conversations: Conversation[]; messages: Message[]; };
+type DBSchema = { users: User[]; agents: Agent[]; conversations: Conversation[]; messages: Message[]; integrations: Integration[]; };
 
 const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'dipperai.json');
 const adapter = new JSONFileSync<DBSchema>(dbPath);
-const db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [] });
+const db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [] });
 try { db.read(); } catch { /* fresh db */ }
 const save = () => { try { db.write(); } catch { /* ignore write errors */ } };
 
@@ -122,6 +127,18 @@ async function callAI(provider: string, model: string, systemPrompt: string, mes
     return result.text || '';
   }
   throw new Error(`Unknown provider: ${provider}`);
+}
+
+// ─── Integration Helpers ─────────────────────────────────────────────────────
+function encodeCredentials(creds: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(creds)) out[k] = Buffer.from(v).toString('base64');
+  return out;
+}
+function decodeCredentials(creds: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(creds)) { try { out[k] = Buffer.from(v, 'base64').toString('utf-8'); } catch { out[k] = v; } }
+  return out;
 }
 
 // ─── Express ──────────────────────────────────────────────────────────────────
@@ -297,6 +314,132 @@ async function startServer() {
   // Healthcheck
   app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+
+  // ─── Integrations ─────────────────────────────────────────────────────────
+  if (!db.data.integrations) db.data.integrations = [];
+
+  app.get('/api/integrations', auth, (req: any, res) => {
+    const items = db.data.integrations.filter(i => i.user_id === req.userId);
+    res.json(items.map(i => ({ ...i, credentials: undefined })));
+  });
+
+  app.post('/api/integrations/:type/connect', auth, async (req: any, res) => {
+    const { type } = req.params;
+    const userId = req.userId;
+
+    try {
+      let bot_info: string | undefined;
+
+      if (type === 'telegram') {
+        const { botToken } = req.body;
+        if (!botToken) return res.status(400).json({ error: 'botToken required' });
+        const r = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+        const data: any = await r.json();
+        if (!data.ok) return res.status(400).json({ error: 'Invalid bot token', details: data.description });
+        bot_info = data.result.username;
+        // Register webhook if APP_URL is set
+        const appUrl = process.env.APP_URL;
+        if (appUrl) {
+          const agentId = req.body.agentId;
+          if (agentId) {
+            await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: `${appUrl}/api/integrations/telegram/webhook/${agentId}` }),
+            });
+          }
+        }
+        const existing = db.data.integrations.find(i => i.user_id === userId && i.type === 'telegram');
+        if (existing) {
+          existing.credentials = encodeCredentials({ botToken });
+          existing.bot_info = bot_info;
+          existing.connected = true;
+        } else {
+          db.data.integrations.push({ id: randomUUID(), user_id: userId, type: 'telegram', credentials: encodeCredentials({ botToken }), connected: true, bot_info, created_at: new Date().toISOString() });
+        }
+        save();
+        return res.json({ success: true, bot_info });
+      }
+
+      if (type === 'discord') {
+        const { botToken, guildId, channelId } = req.body;
+        if (!botToken) return res.status(400).json({ error: 'botToken required' });
+        const existing = db.data.integrations.find(i => i.user_id === userId && i.type === 'discord');
+        const creds = encodeCredentials({ botToken, guildId: guildId || '', channelId: channelId || '' });
+        if (existing) { existing.credentials = creds; existing.connected = true; }
+        else db.data.integrations.push({ id: randomUUID(), user_id: userId, type: 'discord', credentials: creds, connected: true, created_at: new Date().toISOString() });
+        save();
+        return res.json({ success: true });
+      }
+
+      if (type === 'sms') {
+        const { accountSid, authToken, phoneNumber } = req.body;
+        if (!accountSid || !authToken || !phoneNumber) return res.status(400).json({ error: 'accountSid, authToken, and phoneNumber required' });
+        const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}.json`, {
+          headers: { Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}` },
+        });
+        if (!r.ok) return res.status(400).json({ error: 'Invalid Twilio credentials' });
+        const creds = encodeCredentials({ accountSid, authToken, phoneNumber });
+        const existing = db.data.integrations.find(i => i.user_id === userId && i.type === 'sms');
+        if (existing) { existing.credentials = creds; existing.connected = true; existing.bot_info = phoneNumber; }
+        else db.data.integrations.push({ id: randomUUID(), user_id: userId, type: 'sms', credentials: creds, connected: true, bot_info: phoneNumber, created_at: new Date().toISOString() });
+        save();
+        return res.json({ success: true, bot_info: phoneNumber });
+      }
+
+      if (type === 'twitter') {
+        const { apiKey, apiSecret, accessToken, accessTokenSecret } = req.body;
+        if (!apiKey || !apiSecret || !accessToken || !accessTokenSecret) return res.status(400).json({ error: 'All four Twitter credentials required' });
+        const creds = encodeCredentials({ apiKey, apiSecret, accessToken, accessTokenSecret });
+        const existing = db.data.integrations.find(i => i.user_id === userId && i.type === 'twitter');
+        if (existing) { existing.credentials = creds; existing.connected = true; }
+        else db.data.integrations.push({ id: randomUUID(), user_id: userId, type: 'twitter', credentials: creds, connected: true, created_at: new Date().toISOString() });
+        save();
+        return res.json({ success: true });
+      }
+
+      return res.status(400).json({ error: `Unknown integration type: ${type}` });
+    } catch (e: any) {
+      console.error('[integration connect error]', e);
+      res.status(500).json({ error: e?.message || 'Connection failed' });
+    }
+  });
+
+  app.delete('/api/integrations/:type', auth, (req: any, res) => {
+    const { type } = req.params;
+    const idx = db.data.integrations.findIndex(i => i.user_id === req.userId && i.type === type);
+    if (idx !== -1) { db.data.integrations.splice(idx, 1); save(); }
+    res.json({ success: true });
+  });
+
+  // Telegram webhook (no auth)
+  app.post('/api/integrations/telegram/webhook/:agentId', async (req, res) => {
+    const { agentId } = req.params;
+    const update = req.body;
+    res.json({ ok: true }); // Respond immediately to Telegram
+    try {
+      const agent = db.data.agents.find(a => a.id === agentId && a.is_active);
+      if (!agent) return;
+      const msg = update?.message;
+      if (!msg?.text) return;
+      const chatId = msg.chat?.id;
+      if (!chatId) return;
+
+      // Find Telegram integration for this agent's owner
+      const integration = db.data.integrations.find(i => i.user_id === agent.user_id && i.type === 'telegram');
+      if (!integration) return;
+      const { botToken } = decodeCredentials(integration.credentials);
+      if (!botToken) return;
+
+      const history = [{ role: 'user', content: msg.text }];
+      const reply = await callAI(agent.provider, agent.model, agent.system_prompt, history);
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: reply }),
+      });
+      agent.total_messages++;
+      save();
+    } catch (e) { console.error('[telegram webhook error]', e); }
+  });
 
     // Serve frontend
   if (process.env.NODE_ENV !== 'production') {
