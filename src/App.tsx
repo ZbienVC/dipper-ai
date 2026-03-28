@@ -15,8 +15,14 @@ import Settings from './pages/Settings'
 import Billing from './pages/Billing'
 
 function PrivateRoute({ children }: { children: ReactNode }) {
-  const user = localStorage.getItem('dipperai_user')
-  if (!user) return <Navigate to="/login" replace />
+  try {
+    const raw = localStorage.getItem('dipperai_user')
+    if (!raw) return <Navigate to="/login" replace />
+    const user = JSON.parse(raw)
+    if (!user?.token) return <Navigate to="/login" replace />
+  } catch {
+    return <Navigate to="/login" replace />
+  }
   return <>{children}</>
 }
 
@@ -47,3 +53,4 @@ function App() {
 }
 
 export default App
+

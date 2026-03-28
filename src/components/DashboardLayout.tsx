@@ -11,7 +11,7 @@ const navItems = [
   { icon: Bot, label: 'My Agents', path: '/dashboard/agents' },
   { icon: LayoutTemplate, label: 'Templates', path: '/dashboard/templates' },
   { icon: Plug, label: 'Integrations', path: '/dashboard/integrations' },
-  { icon: CheckSquare, label: 'Approvals', path: '/dashboard/approvals', badge: '2' },
+  { icon: CheckSquare, label: 'Approvals', path: '/dashboard/approvals' },
   { icon: BarChart2, label: 'Analytics', path: '/dashboard/analytics' },
   { icon: CreditCard, label: 'Billing', path: '/dashboard/billing' },
   { icon: Settings, label: 'Settings', path: '/dashboard/settings' },
@@ -29,7 +29,7 @@ function getUser(): AppUser {
     const raw = localStorage.getItem('dipperai_user')
     if (raw) return JSON.parse(raw) as AppUser
   } catch {}
-  return { email: 'user@example.com', name: 'User' }
+  return { email: '', name: '' }
 }
 
 export default function DashboardLayout({ children, title }: Props) {
@@ -204,3 +204,4 @@ export default function DashboardLayout({ children, title }: Props) {
     </div>
   )
 }
+
