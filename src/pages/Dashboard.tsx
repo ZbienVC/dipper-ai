@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
-import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3, ArrowRight, Send, Clock, Users2 } from 'lucide-react'
+import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3, ArrowRight, Send, Clock, Users2, Users } from 'lucide-react'
 
 function getToken() {
   try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
@@ -33,6 +33,7 @@ export default function Dashboard() {
   const [usage, setUsage] = useState<{ plan: string; messagesUsedToday: number; messagesLimitToday: number } | null>(null)
   const [recentActivity, setRecentActivity] = useState<any[]>([])
   const [teams, setTeams] = useState<any[]>([])
+  const [leadStats, setLeadStats] = useState<{ total: number; byStage: Record<string, number>; totalValue: number } | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -45,13 +46,15 @@ export default function Dashboard() {
       fetch('/api/usage', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null).catch(() => null),
       fetch('/api/activity?limit=5', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : { logs: [] }).catch(() => ({ logs: [] })),
       fetch('/api/teams', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : []).catch(() => []),
-    ]).then(([agentData, analyticsData, integrationData, usageData, activityData, teamsData]) => {
+      fetch('/api/leads/stats', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([agentData, analyticsData, integrationData, usageData, activityData, teamsData, leadsStatsData]) => {
       if (Array.isArray(agentData)) setAgents(agentData)
       if (analyticsData) setAnalytics(analyticsData)
       if (Array.isArray(integrationData)) setIntegrationCount(integrationData.filter((i: any) => i.connected).length)
       if (usageData) setUsage(usageData)
       if (activityData?.logs) setRecentActivity(activityData.logs)
       if (Array.isArray(teamsData)) setTeams(teamsData)
+      if (leadsStatsData) setLeadStats(leadsStatsData)
     }).finally(() => setLoading(false))
   }, [])
 
@@ -324,6 +327,54 @@ export default function Dashboard() {
                 +{teams.length - 3} more teams →
               </Link>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* Pipeline Widget */}
+      <div className="mt-5 bg-[#111118] rounded-xl p-5 border border-[#1e1e2e]">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Users size={15} className="text-violet-400" />
+            <h2 className="text-sm font-semibold text-white">Pipeline</h2>
+          </div>
+          <Link to="/dashboard/leads" className="text-xs text-violet-400 hover:text-violet-300 font-medium transition-colors">
+            View CRM →
+          </Link>
+        </div>
+        {loading ? (
+          <div className="flex gap-2 flex-wrap">
+            {[0,1,2,3,4,5].map(i => <div key={i} className="h-7 w-20 animate-pulse bg-white/5 rounded-full" />)}
+          </div>
+        ) : !leadStats || leadStats.total === 0 ? (
+          <div className="text-center py-4">
+            <p className="text-slate-600 text-xs mb-2">No leads yet. Leads auto-create when users message your agents.</p>
+            <Link to="/dashboard/leads" className="text-xs text-violet-400 hover:text-violet-300 transition-colors">
+              Open CRM →
+            </Link>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex gap-2 flex-wrap">
+              {[
+                { key: 'new', label: 'New', color: 'bg-blue-500/20 text-blue-400 border border-blue-500/30' },
+                { key: 'contacted', label: 'Contacted', color: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' },
+                { key: 'qualified', label: 'Qualified', color: 'bg-violet-500/20 text-violet-400 border border-violet-500/30' },
+                { key: 'proposal', label: 'Proposal', color: 'bg-orange-500/20 text-orange-400 border border-orange-500/30' },
+                { key: 'closed_won', label: 'Won', color: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' },
+                { key: 'closed_lost', label: 'Lost', color: 'bg-red-500/20 text-red-400 border border-red-500/30' },
+              ].map(s => (
+                <span key={s.key} className={`text-xs font-bold px-2.5 py-1 rounded-full ${s.color}`}>
+                  {s.label} {leadStats.byStage[s.key] || 0}
+                </span>
+              ))}
+            </div>
+            <div className="flex items-center gap-3 text-xs text-slate-500">
+              <span>{leadStats.total} total leads</span>
+              {leadStats.totalValue > 0 && (
+                <span className="text-emerald-400 font-semibold">${leadStats.totalValue.toLocaleString()} pipeline value</span>
+              )}
+            </div>
           </div>
         )}
       </div>

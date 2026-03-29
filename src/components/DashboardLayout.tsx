@@ -3,13 +3,14 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Bot, LayoutTemplate, Plug, CheckSquare,
   BarChart2, CreditCard, Settings, Bell, Search,
-  LogOut, ChevronDown, Menu, X, User, Zap, Activity, Users2
+  LogOut, ChevronDown, Menu, X, User, Zap, Activity, Users2, Users
 } from 'lucide-react'
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
   { icon: Bot, label: 'My Agents', path: '/dashboard/agents' },
   { icon: Users2, label: 'Teams', path: '/dashboard/teams' },
+  { icon: Users, label: 'Leads', path: '/dashboard/leads' },
   { icon: LayoutTemplate, label: 'Templates', path: '/dashboard/templates' },
   { icon: Plug, label: 'Integrations', path: '/dashboard/integrations' },
   { icon: CheckSquare, label: 'Approvals', path: '/dashboard/approvals' },

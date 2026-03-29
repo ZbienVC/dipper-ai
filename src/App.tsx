@@ -19,6 +19,7 @@ import Admin from './pages/Admin'
 import EmbedChat from './pages/EmbedChat'
 import Teams from './pages/Teams'
 import TeamDetail from './pages/TeamDetail'
+import Leads from './pages/Leads'
 
 function PrivateRoute({ children }: { children: ReactNode }) {
   try {
@@ -55,6 +56,7 @@ function App() {
         <Route path="/dashboard/billing" element={<PrivateRoute><Billing /></PrivateRoute>} />
         <Route path="/dashboard/teams" element={<PrivateRoute><Teams /></PrivateRoute>} />
         <Route path="/dashboard/teams/:id" element={<PrivateRoute><TeamDetail /></PrivateRoute>} />
+        <Route path="/dashboard/leads" element={<PrivateRoute><Leads /></PrivateRoute>} />
 
         <Route path="/admin" element={<Admin />} />
 

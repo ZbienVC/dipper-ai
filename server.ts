@@ -173,6 +173,28 @@ type TeamTaskLog = {
   created_at: string;
 };
 
+type Lead = {
+  id: string;
+  user_id: string;
+  agent_id: string;
+  agent_name: string;
+  identifier: string;
+  channel: string;
+  display_name?: string;
+  email?: string;
+  phone?: string;
+  stage: 'new' | 'contacted' | 'qualified' | 'proposal' | 'closed_won' | 'closed_lost';
+  tags: string[];
+  notes: string;
+  message_count: number;
+  last_contact: string;
+  first_contact: string;
+  value?: number;
+  memory_summary?: string;
+  created_at: string;
+  updated_at: string;
+};
+
 type DBSchema = {
   users: User[]; agents: Agent[]; conversations: Conversation[];
   messages: Message[]; integrations: Integration[];
@@ -185,6 +207,7 @@ type DBSchema = {
   agent_teams: AgentTeam[];
   team_tasks: TeamTask[];
   team_task_logs: TeamTaskLog[];
+  leads: Lead[];
 };
 
 // ─── Plan Definitions ─────────────────────────────────────────────────────────
@@ -418,6 +441,40 @@ async function extractAndUpdateMemory(
     }
 
     mem.updated_at = new Date().toISOString();
+
+    // ─── Upsert Lead from memory ──────────────────────────────────────────────
+    try {
+      if (!db.data.leads) db.data.leads = [];
+      const agent = db.data.agents.find(a => a.id === agentId);
+      let lead = db.data.leads.find(l => l.agent_id === agentId && l.identifier === userIdentifier);
+      if (!lead) {
+        lead = {
+          id: randomUUID(),
+          user_id: agent?.user_id || '',
+          agent_id: agentId,
+          agent_name: agent?.name || 'Unknown',
+          identifier: userIdentifier,
+          channel,
+          stage: 'new',
+          tags: [],
+          notes: '',
+          message_count: mem.message_count,
+          last_contact: mem.last_seen,
+          first_contact: mem.first_seen,
+          created_at: now,
+          updated_at: now,
+        };
+        db.data.leads.push(lead);
+      }
+      // Sync non-manual fields
+      lead.message_count = mem.message_count;
+      lead.last_contact = mem.last_seen;
+      lead.agent_name = agent?.name || lead.agent_name;
+      if (mem.facts.name && !lead.display_name) lead.display_name = mem.facts.name;
+      if (mem.summary) lead.memory_summary = mem.summary;
+      lead.updated_at = now;
+    } catch { /* fail silently */ }
+
     save();
   } catch { /* fail silently — never block chat */ }
 }
@@ -723,7 +780,7 @@ async function startServer() {
   try {
     const { JSONFileSync } = await import('lowdb/node');
     const adapter = new JSONFileSync<DBSchema>(dbPath);
-    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [] });
+    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [] });
     try { db.read(); } catch { /* fresh */ }
     if (!db.data.scheduled_messages) db.data.scheduled_messages = [];
     if (!db.data.activity_logs) db.data.activity_logs = [];
@@ -733,12 +790,13 @@ async function startServer() {
     if (!db.data.agent_teams) db.data.agent_teams = [];
     if (!db.data.team_tasks) db.data.team_tasks = [];
     if (!db.data.team_task_logs) db.data.team_task_logs = [];
+    if (!db.data.leads) db.data.leads = [];
     db.write();
     console.log('[DipperAI] File DB:', dbPath);
   } catch {
     console.warn('[DipperAI] Read-only filesystem, using in-memory DB');
     const { MemorySync } = await import('lowdb');
-    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [] });
+    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [] });
   }
 
   startCronRunner();
@@ -2090,6 +2148,137 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     save();
     setTimeout(() => runTeamTask(task.id), 10);
     res.json(task);
+  });
+
+  // ─── Lead CRM Endpoints ───────────────────────────────────────────────────
+
+  // GET /api/leads/stats
+  app.get('/api/leads/stats', auth, (req: any, res) => {
+    if (!db.data.leads) return res.json({ total: 0, byStage: {}, totalValue: 0, newThisWeek: 0 });
+    const leads = db.data.leads.filter(l => l.user_id === req.userId);
+    const byStage: Record<string, number> = {
+      new: 0, contacted: 0, qualified: 0, proposal: 0, closed_won: 0, closed_lost: 0,
+    };
+    let totalValue = 0;
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    let newThisWeek = 0;
+    for (const l of leads) {
+      byStage[l.stage] = (byStage[l.stage] || 0) + 1;
+      if (l.value) totalValue += l.value;
+      if (l.created_at >= oneWeekAgo) newThisWeek++;
+    }
+    res.json({ total: leads.length, byStage, totalValue, newThisWeek });
+  });
+
+  // GET /api/leads
+  app.get('/api/leads', auth, (req: any, res) => {
+    if (!db.data.leads) return res.json({ leads: [], total: 0 });
+    let leads = db.data.leads.filter(l => l.user_id === req.userId);
+    const { stage, agentId, search, limit = '50', offset = '0' } = req.query as any;
+    if (stage) leads = leads.filter(l => l.stage === stage);
+    if (agentId) leads = leads.filter(l => l.agent_id === agentId);
+    if (search) {
+      const q = search.toLowerCase();
+      leads = leads.filter(l =>
+        l.display_name?.toLowerCase().includes(q) ||
+        l.identifier.toLowerCase().includes(q) ||
+        l.notes.toLowerCase().includes(q) ||
+        l.tags.some(t => t.toLowerCase().includes(q))
+      );
+    }
+    leads = leads.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    const total = leads.length;
+    const paged = leads.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+    res.json({ leads: paged, total, offset: parseInt(offset), limit: parseInt(limit) });
+  });
+
+  // GET /api/leads/:id
+  app.get('/api/leads/:id', auth, (req: any, res) => {
+    if (!db.data.leads) return res.status(404).json({ error: 'Not found' });
+    const lead = db.data.leads.find(l => l.id === req.params.id && l.user_id === req.userId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    const agent = db.data.agents.find(a => a.id === lead.agent_id);
+    const memory = db.data.user_memories?.find(m => m.agent_id === lead.agent_id && m.user_identifier === lead.identifier);
+    res.json({ ...lead, agent, memory });
+  });
+
+  // POST /api/leads
+  app.post('/api/leads', auth, (req: any, res) => {
+    if (!db.data.leads) db.data.leads = [];
+    const { agent_id, identifier, channel, display_name, email, phone, stage, tags, notes, value } = req.body;
+    if (!agent_id || !identifier || !channel) return res.status(400).json({ error: 'agent_id, identifier, channel required' });
+    const agent = db.data.agents.find(a => a.id === agent_id && a.user_id === req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const now = new Date().toISOString();
+    const lead: Lead = {
+      id: randomUUID(),
+      user_id: req.userId,
+      agent_id,
+      agent_name: agent.name,
+      identifier,
+      channel,
+      display_name,
+      email,
+      phone,
+      stage: stage || 'new',
+      tags: tags || [],
+      notes: notes || '',
+      message_count: 0,
+      last_contact: now,
+      first_contact: now,
+      value,
+      created_at: now,
+      updated_at: now,
+    };
+    db.data.leads.push(lead);
+    save();
+    res.status(201).json(lead);
+  });
+
+  // PATCH /api/leads/:id
+  app.patch('/api/leads/:id', auth, (req: any, res) => {
+    if (!db.data.leads) return res.status(404).json({ error: 'Not found' });
+    const lead = db.data.leads.find(l => l.id === req.params.id && l.user_id === req.userId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    const { stage, display_name, email, phone, value, tags, notes } = req.body;
+    if (stage && stage !== lead.stage) {
+      const dateStr = new Date().toISOString().split('T')[0];
+      lead.notes = (lead.notes || '') + `\n[${dateStr}] Stage: ${lead.stage} → ${stage}`;
+      lead.stage = stage;
+    }
+    if (display_name !== undefined) lead.display_name = display_name;
+    if (email !== undefined) lead.email = email;
+    if (phone !== undefined) lead.phone = phone;
+    if (value !== undefined) lead.value = value;
+    if (tags !== undefined) lead.tags = tags;
+    if (notes !== undefined) lead.notes = notes;
+    lead.updated_at = new Date().toISOString();
+    save();
+    res.json(lead);
+  });
+
+  // DELETE /api/leads/:id
+  app.delete('/api/leads/:id', auth, (req: any, res) => {
+    if (!db.data.leads) return res.status(404).json({ error: 'Not found' });
+    const idx = db.data.leads.findIndex(l => l.id === req.params.id && l.user_id === req.userId);
+    if (idx === -1) return res.status(404).json({ error: 'Lead not found' });
+    db.data.leads.splice(idx, 1);
+    save();
+    res.json({ ok: true });
+  });
+
+  // POST /api/leads/:id/note
+  app.post('/api/leads/:id/note', auth, (req: any, res) => {
+    if (!db.data.leads) return res.status(404).json({ error: 'Not found' });
+    const lead = db.data.leads.find(l => l.id === req.params.id && l.user_id === req.userId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    const { note } = req.body;
+    if (!note) return res.status(400).json({ error: 'note required' });
+    const ts = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    lead.notes = (lead.notes ? lead.notes + '\n' : '') + `[${ts}] ${note}`;
+    lead.updated_at = new Date().toISOString();
+    save();
+    res.json(lead);
   });
 
   // ─── Frontend ─────────────────────────────────────────────────────────────
