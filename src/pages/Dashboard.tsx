@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
-import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3, ArrowRight, Send, Clock } from 'lucide-react'
+import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3, ArrowRight, Send, Clock, Users2 } from 'lucide-react'
 
 function getToken() {
   try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
@@ -32,6 +32,7 @@ export default function Dashboard() {
   const [integrationCount, setIntegrationCount] = useState(0)
   const [usage, setUsage] = useState<{ plan: string; messagesUsedToday: number; messagesLimitToday: number } | null>(null)
   const [recentActivity, setRecentActivity] = useState<any[]>([])
+  const [teams, setTeams] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -43,12 +44,14 @@ export default function Dashboard() {
       fetch('/api/integrations', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()).catch(() => []),
       fetch('/api/usage', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null).catch(() => null),
       fetch('/api/activity?limit=5', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : { logs: [] }).catch(() => ({ logs: [] })),
-    ]).then(([agentData, analyticsData, integrationData, usageData, activityData]) => {
+      fetch('/api/teams', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : []).catch(() => []),
+    ]).then(([agentData, analyticsData, integrationData, usageData, activityData, teamsData]) => {
       if (Array.isArray(agentData)) setAgents(agentData)
       if (analyticsData) setAnalytics(analyticsData)
       if (Array.isArray(integrationData)) setIntegrationCount(integrationData.filter((i: any) => i.connected).length)
       if (usageData) setUsage(usageData)
       if (activityData?.logs) setRecentActivity(activityData.logs)
+      if (Array.isArray(teamsData)) setTeams(teamsData)
     }).finally(() => setLoading(false))
   }, [])
 
@@ -270,6 +273,59 @@ export default function Dashboard() {
             View all activity →
           </button>
         </div>
+      </div>
+
+      {/* Active Teams Widget */}
+      <div className="mt-5 bg-[#111118] rounded-xl p-5 border border-[#1e1e2e]">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Users2 size={15} className="text-violet-400" />
+            <h2 className="text-sm font-semibold text-white">Agent Teams</h2>
+          </div>
+          <Link to="/dashboard/teams" className="text-xs text-violet-400 hover:text-violet-300 font-medium transition-colors">
+            View all →
+          </Link>
+        </div>
+        {loading ? (
+          <div className="flex items-center justify-center py-6">
+            <div className="w-5 h-5 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin" />
+          </div>
+        ) : teams.length === 0 ? (
+          <div className="text-center py-6">
+            <p className="text-slate-600 text-xs mb-3">No teams yet. Form a team of agents to tackle complex tasks together.</p>
+            <Link to="/dashboard/teams" className="gradient-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold">
+              <Plus size={12} /> Create Team
+            </Link>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {teams.slice(0, 3).map((team: any) => (
+              <Link key={team.id} to={`/dashboard/teams/${team.id}`}
+                className="flex items-center gap-3 p-3 rounded-xl bg-white/3 border border-[#1e1e2e] hover:border-violet-500/30 hover:bg-violet-500/5 transition-all group">
+                <div className="w-8 h-8 rounded-lg bg-violet-500/15 border border-violet-500/20 flex items-center justify-center flex-shrink-0">
+                  <Users2 size={14} className="text-violet-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-white group-hover:text-violet-300 transition-colors truncate">{team.name}</p>
+                  <p className="text-xs text-slate-600">{(team.members || []).length} members</p>
+                </div>
+                {team.lastTask && (
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${
+                    team.lastTask.status === 'success' ? 'bg-emerald-500/15 text-emerald-400' :
+                    team.lastTask.status === 'error' ? 'bg-red-500/15 text-red-400' :
+                    team.lastTask.status === 'running' ? 'bg-violet-500/15 text-violet-400' :
+                    'bg-slate-500/15 text-slate-400'
+                  }`}>{team.lastTask.status}</span>
+                )}
+              </Link>
+            ))}
+            {teams.length > 3 && (
+              <Link to="/dashboard/teams" className="block text-center text-xs text-violet-400 hover:text-violet-300 pt-2 transition-colors">
+                +{teams.length - 3} more teams →
+              </Link>
+            )}
+          </div>
+        )}
       </div>
     </DashboardLayout>
   )

@@ -138,6 +138,41 @@ type KnowledgeSource = {
   updated_at: string;
 };
 
+type AgentTeam = {
+  id: string;
+  user_id: string;
+  name: string;
+  description?: string;
+  orchestrator_agent_id: string;
+  member_agent_ids: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+type TeamTask = {
+  id: string;
+  team_id: string;
+  user_id: string;
+  title: string;
+  instructions: string;
+  status: 'pending' | 'running' | 'success' | 'error';
+  orchestrator_plan?: string;
+  result_summary?: string;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type TeamTaskLog = {
+  id: string;
+  task_id: string;
+  agent_id: string;
+  role: 'orchestrator' | 'specialist';
+  action: 'plan' | 'delegate' | 'work' | 'handoff' | 'summary' | 'error';
+  content: string;
+  created_at: string;
+};
+
 type DBSchema = {
   users: User[]; agents: Agent[]; conversations: Conversation[];
   messages: Message[]; integrations: Integration[];
@@ -147,6 +182,9 @@ type DBSchema = {
   automations: Automation[];
   automation_runs: AutomationRun[];
   knowledge_sources: KnowledgeSource[];
+  agent_teams: AgentTeam[];
+  team_tasks: TeamTask[];
+  team_task_logs: TeamTaskLog[];
 };
 
 // ─── Plan Definitions ─────────────────────────────────────────────────────────
@@ -685,19 +723,22 @@ async function startServer() {
   try {
     const { JSONFileSync } = await import('lowdb/node');
     const adapter = new JSONFileSync<DBSchema>(dbPath);
-    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [] });
+    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [] });
     try { db.read(); } catch { /* fresh */ }
     if (!db.data.scheduled_messages) db.data.scheduled_messages = [];
     if (!db.data.activity_logs) db.data.activity_logs = [];
     if (!db.data.user_memories) db.data.user_memories = [];
     if (!db.data.automations) db.data.automations = [];
     if (!db.data.automation_runs) db.data.automation_runs = [];
+    if (!db.data.agent_teams) db.data.agent_teams = [];
+    if (!db.data.team_tasks) db.data.team_tasks = [];
+    if (!db.data.team_task_logs) db.data.team_task_logs = [];
     db.write();
     console.log('[DipperAI] File DB:', dbPath);
   } catch {
     console.warn('[DipperAI] Read-only filesystem, using in-memory DB');
     const { MemorySync } = await import('lowdb');
-    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [] });
+    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [] });
   }
 
   startCronRunner();
@@ -1760,6 +1801,295 @@ async function startServer() {
       .sort((a, b) => b.started_at.localeCompare(a.started_at))
       .slice(0, 50);
     res.json(runs);
+  });
+
+  // ─── Team Task Helpers ────────────────────────────────────────────────────
+
+  async function runTeamTask(taskId: string) {
+    if (!db.data.team_tasks) db.data.team_tasks = [];
+    if (!db.data.team_task_logs) db.data.team_task_logs = [];
+
+    const task = db.data.team_tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    const appendLog = (agentId: string, role: 'orchestrator' | 'specialist', action: TeamTaskLog['action'], content: string) => {
+      const log: TeamTaskLog = { id: randomUUID(), task_id: taskId, agent_id: agentId, role, action, content, created_at: new Date().toISOString() };
+      db.data.team_task_logs.push(log);
+      save();
+    };
+
+    const markError = (msg: string) => {
+      task.status = 'error';
+      task.error_message = msg;
+      task.updated_at = new Date().toISOString();
+      save();
+    };
+
+    try {
+      const team = db.data.agent_teams?.find(t => t.id === task.team_id);
+      if (!team) { markError('Team not found'); return; }
+
+      const orchestrator = db.data.agents.find(a => a.id === team.orchestrator_agent_id && a.is_active);
+      if (!orchestrator) { markError('Orchestrator agent not found'); return; }
+
+      const members = team.member_agent_ids
+        .map(id => db.data.agents.find(a => a.id === id && a.is_active))
+        .filter(Boolean) as Agent[];
+
+      const memberList = members.map(a => `- ${a.name} (id: ${a.id}): ${a.description || a.system_prompt.slice(0, 100)}`).join('\n');
+
+      // Step 1: Orchestrator creates plan
+      const planPrompt = `You are an orchestrator managing a team of AI specialists.
+
+Team: "${team.name}"
+${team.description ? `Description: ${team.description}` : ''}
+
+Available specialists:
+${memberList}
+
+Task Title: ${task.title}
+Instructions: ${task.instructions}
+
+Your job: Break this task into subtasks and assign each to the most appropriate specialist.
+Return ONLY a valid JSON array (no markdown, no extra text), like:
+[
+  { "agent_id": "...", "agent_name": "...", "objective": "..." },
+  ...
+]
+Each agent_id must be from the list above. Be specific about each objective.`;
+
+      const planResult = await callAI(orchestrator.provider, orchestrator.model, orchestrator.system_prompt, [{ role: 'user', content: planPrompt }], 1024);
+      appendLog(orchestrator.id, 'orchestrator', 'plan', planResult.text);
+
+      let plan: { agent_id: string; agent_name: string; objective: string }[] = [];
+      try {
+        const cleaned = planResult.text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+        plan = JSON.parse(cleaned);
+        if (!Array.isArray(plan)) throw new Error('Not array');
+      } catch {
+        markError('Orchestrator did not return a valid plan JSON');
+        appendLog(orchestrator.id, 'orchestrator', 'error', 'Failed to parse plan JSON: ' + planResult.text.slice(0, 500));
+        return;
+      }
+
+      task.orchestrator_plan = JSON.stringify(plan);
+      task.updated_at = new Date().toISOString();
+      save();
+
+      // Step 2: Delegate and execute each subtask
+      const specialistOutputs: { agentName: string; objective: string; result: string }[] = [];
+
+      for (const step of plan) {
+        const specialist = members.find(a => a.id === step.agent_id);
+        if (!specialist) {
+          appendLog(step.agent_id || 'unknown', 'specialist', 'error', `Agent not found: ${step.agent_id}`);
+          continue;
+        }
+
+        appendLog(orchestrator.id, 'orchestrator', 'delegate', `Delegating to ${specialist.name}: ${step.objective}`);
+
+        try {
+          const workResult = await callAI(
+            specialist.provider,
+            specialist.model,
+            specialist.system_prompt,
+            [{ role: 'user', content: step.objective }],
+            1024
+          );
+          appendLog(specialist.id, 'specialist', 'work', workResult.text);
+          appendLog(specialist.id, 'specialist', 'handoff', `Completed: ${step.objective}`);
+          specialistOutputs.push({ agentName: specialist.name, objective: step.objective, result: workResult.text });
+        } catch (e: any) {
+          appendLog(specialist.id, 'specialist', 'error', `Error: ${e?.message || 'Unknown error'}`);
+          specialistOutputs.push({ agentName: specialist.name, objective: step.objective, result: `Error: ${e?.message}` });
+        }
+      }
+
+      // Step 3: Orchestrator summarizes
+      const summaryInput = specialistOutputs.map(o =>
+        `${o.agentName} worked on: "${o.objective}"\nResult: ${o.result}`
+      ).join('\n\n---\n\n');
+
+      const summaryPrompt = `You orchestrated a team to complete the following task:
+Title: ${task.title}
+Instructions: ${task.instructions}
+
+Here are the specialists' outputs:
+${summaryInput}
+
+Now write a comprehensive final summary of what was accomplished, combining all results into a cohesive response for the user.`;
+
+      const summaryResult = await callAI(orchestrator.provider, orchestrator.model, orchestrator.system_prompt, [{ role: 'user', content: summaryPrompt }], 1500);
+      appendLog(orchestrator.id, 'orchestrator', 'summary', summaryResult.text);
+
+      task.result_summary = summaryResult.text;
+      task.status = 'success';
+      task.updated_at = new Date().toISOString();
+      save();
+
+      const user = findUser(task.user_id);
+      logActivity({
+        user_id: task.user_id,
+        agent_id: orchestrator.id,
+        agent_name: orchestrator.name,
+        event_type: 'command_executed',
+        channel: 'system',
+        summary: `Team "${team.name}" ran task "${task.title}"`,
+        details: `Status: success. ${plan.length} subtask(s) completed.`,
+        status: 'success',
+      });
+      if (user) { user.messages_today = (user.messages_today || 0) + plan.length + 2; save(); }
+
+    } catch (e: any) {
+      markError(e?.message || 'Unknown error');
+      const team = db.data.agent_teams?.find(t => t.id === task.team_id);
+      const orchestrator = team ? db.data.agents.find(a => a.id === team.orchestrator_agent_id) : null;
+      if (orchestrator) appendLog(orchestrator.id, 'orchestrator', 'error', e?.message || 'Unknown error');
+      logActivity({
+        user_id: task.user_id,
+        agent_id: orchestrator?.id || 'unknown',
+        agent_name: orchestrator?.name || 'Orchestrator',
+        event_type: 'command_executed',
+        channel: 'system',
+        summary: `Team "${team?.name || ''}" task "${task.title}" failed`,
+        details: e?.message || 'Unknown error',
+        status: 'error',
+        error_message: e?.message,
+      });
+    }
+  }
+
+  // ─── Teams API ────────────────────────────────────────────────────────────
+
+  // GET /api/teams
+  app.get('/api/teams', auth, (req: any, res) => {
+    if (!db.data.agent_teams) db.data.agent_teams = [];
+    const teams = db.data.agent_teams.filter(t => t.user_id === req.userId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    // Enrich with member info
+    const enriched = teams.map(team => {
+      const members = team.member_agent_ids.map(id => db.data.agents.find(a => a.id === id && a.is_active)).filter(Boolean);
+      const orchestrator = db.data.agents.find(a => a.id === team.orchestrator_agent_id);
+      const lastTasks = (db.data.team_tasks || []).filter(t => t.team_id === team.id)
+        .sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 1);
+      return { ...team, members, orchestrator, lastTask: lastTasks[0] || null };
+    });
+    res.json(enriched);
+  });
+
+  // POST /api/teams
+  app.post('/api/teams', auth, (req: any, res) => {
+    if (!db.data.agent_teams) db.data.agent_teams = [];
+    const { name, description, orchestrator_agent_id, member_agent_ids } = req.body;
+    if (!name || !orchestrator_agent_id || !Array.isArray(member_agent_ids)) {
+      return res.status(400).json({ error: 'name, orchestrator_agent_id, and member_agent_ids are required' });
+    }
+    const now = new Date().toISOString();
+    const team: AgentTeam = {
+      id: randomUUID(), user_id: req.userId, name, description,
+      orchestrator_agent_id, member_agent_ids, created_at: now, updated_at: now,
+    };
+    db.data.agent_teams.push(team);
+    save();
+    res.status(201).json(team);
+  });
+
+  // GET /api/teams/:id
+  app.get('/api/teams/:id', auth, (req: any, res) => {
+    if (!db.data.agent_teams) return res.status(404).json({ error: 'Not found' });
+    const team = db.data.agent_teams.find(t => t.id === req.params.id && t.user_id === req.userId);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+    const members = team.member_agent_ids.map(id => db.data.agents.find(a => a.id === id && a.is_active)).filter(Boolean);
+    const orchestrator = db.data.agents.find(a => a.id === team.orchestrator_agent_id);
+    const lastTasks = (db.data.team_tasks || []).filter(t => t.team_id === team.id)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 5);
+    res.json({ ...team, members, orchestrator, lastTasks });
+  });
+
+  // PATCH /api/teams/:id
+  app.patch('/api/teams/:id', auth, (req: any, res) => {
+    if (!db.data.agent_teams) return res.status(404).json({ error: 'Not found' });
+    const team = db.data.agent_teams.find(t => t.id === req.params.id && t.user_id === req.userId);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+    const { name, description, orchestrator_agent_id, member_agent_ids } = req.body;
+    if (name !== undefined) team.name = name;
+    if (description !== undefined) team.description = description;
+    if (orchestrator_agent_id !== undefined) team.orchestrator_agent_id = orchestrator_agent_id;
+    if (Array.isArray(member_agent_ids)) team.member_agent_ids = member_agent_ids;
+    team.updated_at = new Date().toISOString();
+    save();
+    res.json(team);
+  });
+
+  // DELETE /api/teams/:id
+  app.delete('/api/teams/:id', auth, (req: any, res) => {
+    if (!db.data.agent_teams) return res.status(404).json({ error: 'Not found' });
+    const idx = db.data.agent_teams.findIndex(t => t.id === req.params.id && t.user_id === req.userId);
+    if (idx === -1) return res.status(404).json({ error: 'Team not found' });
+    db.data.agent_teams.splice(idx, 1);
+    save();
+    res.json({ success: true });
+  });
+
+  // POST /api/teams/:id/tasks — create & run async
+  app.post('/api/teams/:id/tasks', auth, async (req: any, res) => {
+    if (!db.data.agent_teams) return res.status(404).json({ error: 'Team not found' });
+    const team = db.data.agent_teams.find(t => t.id === req.params.id && t.user_id === req.userId);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+    const { title, instructions } = req.body;
+    if (!title || !instructions) return res.status(400).json({ error: 'title and instructions are required' });
+    if (!db.data.team_tasks) db.data.team_tasks = [];
+    const now = new Date().toISOString();
+    const task: TeamTask = {
+      id: randomUUID(), team_id: team.id, user_id: req.userId,
+      title, instructions, status: 'running',
+      created_at: now, updated_at: now,
+    };
+    db.data.team_tasks.push(task);
+    save();
+    setTimeout(() => runTeamTask(task.id), 10);
+    res.status(201).json(task);
+  });
+
+  // GET /api/team-tasks
+  app.get('/api/team-tasks', auth, (req: any, res) => {
+    if (!db.data.team_tasks) return res.json([]);
+    let tasks = db.data.team_tasks.filter(t => t.user_id === req.userId);
+    if (req.query.team_id) tasks = tasks.filter(t => t.team_id === req.query.team_id);
+    if (req.query.status) tasks = tasks.filter(t => t.status === req.query.status);
+    tasks = tasks.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    res.json(tasks);
+  });
+
+  // GET /api/team-tasks/:id
+  app.get('/api/team-tasks/:id', auth, (req: any, res) => {
+    if (!db.data.team_tasks) return res.status(404).json({ error: 'Not found' });
+    const task = db.data.team_tasks.find(t => t.id === req.params.id && t.user_id === req.userId);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    const logs = (db.data.team_task_logs || []).filter(l => l.task_id === task.id)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    const logsWithAgent = logs.map(l => ({ ...l, agent: db.data.agents.find(a => a.id === l.agent_id) }));
+    res.json({ ...task, logs: logsWithAgent });
+  });
+
+  // POST /api/team-tasks/:id/run — rerun
+  app.post('/api/team-tasks/:id/run', auth, async (req: any, res) => {
+    if (!db.data.team_tasks) return res.status(404).json({ error: 'Not found' });
+    const task = db.data.team_tasks.find(t => t.id === req.params.id && t.user_id === req.userId);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    // Reset task state
+    task.status = 'running';
+    task.orchestrator_plan = undefined;
+    task.result_summary = undefined;
+    task.error_message = undefined;
+    task.updated_at = new Date().toISOString();
+    // Clear old logs
+    if (db.data.team_task_logs) {
+      db.data.team_task_logs = db.data.team_task_logs.filter(l => l.task_id !== task.id);
+    }
+    save();
+    setTimeout(() => runTeamTask(task.id), 10);
+    res.json(task);
   });
 
   // ─── Frontend ─────────────────────────────────────────────────────────────
