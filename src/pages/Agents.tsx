@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
-import { Plus, Search, MessageSquare, Circle, Edit3, Bot } from 'lucide-react'
+import { Plus, Search, MessageSquare, Circle, Edit3, Bot, Headphones, TrendingUp, User, Sparkles, ArrowRight } from 'lucide-react'
 
 interface Agent {
   id: string
@@ -15,6 +15,48 @@ interface Agent {
 
 type Filter = 'All' | 'Active' | 'Paused' | 'Draft'
 const FILTERS: Filter[] = ['All', 'Active', 'Paused', 'Draft']
+
+const AGENT_TEMPLATES = [
+  {
+    id: 'customer-support',
+    name: 'Customer Support Bot',
+    desc: 'Handles FAQs, resolves tickets, and escalates issues 24/7 with patience and accuracy.',
+    icon: Headphones,
+    color: 'text-violet-400',
+    bg: 'bg-violet-500/10',
+    border: 'border-violet-500/20',
+    systemPrompt: 'You are a professional and empathetic customer support agent. You resolve issues quickly, acknowledge frustration with patience, and always aim to leave the customer satisfied. Escalate complex issues gracefully.',
+    adjectives: ['Helpful', 'Patient', 'Professional'],
+    tone: 'Empathetic',
+    commStyle: 'Professional',
+  },
+  {
+    id: 'sales-bot',
+    name: 'Sales Agent',
+    desc: 'Qualifies leads, handles objections, and guides prospects toward a decision without being pushy.',
+    icon: TrendingUp,
+    color: 'text-teal-400',
+    bg: 'bg-teal-500/10',
+    border: 'border-teal-500/20',
+    systemPrompt: 'You are a skilled sales agent. You ask thoughtful discovery questions, listen actively, and understand the prospect\'s real needs before presenting solutions. You handle objections with empathy and close conversations with clear next steps.',
+    adjectives: ['Persuasive', 'Confident', 'Empathetic'],
+    tone: 'Assertive',
+    commStyle: 'Professional',
+  },
+  {
+    id: 'personal-assistant',
+    name: 'Personal Assistant',
+    desc: 'Manages tasks, answers questions, drafts content, and keeps your day on track.',
+    icon: User,
+    color: 'text-amber-400',
+    bg: 'bg-amber-500/10',
+    border: 'border-amber-500/20',
+    systemPrompt: 'You are a highly capable personal assistant. You help with scheduling, research, writing, and organizing information. You are concise, proactive, and always one step ahead. You anticipate needs and deliver results quickly.',
+    adjectives: ['Organized', 'Proactive', 'Detail-oriented'],
+    tone: 'Friendly',
+    commStyle: 'Casual & Friendly',
+  },
+]
 
 export default function Agents() {
   const navigate = useNavigate()
@@ -98,20 +140,66 @@ export default function Agents() {
         <div className="flex items-center justify-center py-20">
           <div className="w-6 h-6 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin" />
         </div>
-      ) : filtered.length === 0 ? (
+      ) : filtered.length === 0 && search ? (
         <div className="bg-[#111118] rounded-xl border border-[#1e1e2e] p-16 text-center">
           <div className="w-14 h-14 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto mb-4">
             <Bot size={28} className="text-violet-400" />
           </div>
           <h3 className="text-base font-bold text-white mb-2">No agents found</h3>
-          <p className="text-slate-500 text-sm mb-5">
-            {search ? `No agents match "${search}"` : 'Create your first agent to get started.'}
-          </p>
+          <p className="text-slate-500 text-sm mb-5">No agents match "{search}"</p>
           <button
             onClick={() => navigate('/dashboard/agents/new')}
             className="gradient-btn px-5 py-2 rounded-xl font-semibold text-sm inline-flex items-center gap-2"
           >
             <Plus size={14} /> Create Agent
+          </button>
+        </div>
+      ) : filtered.length === 0 && agents.length === 0 ? (
+        /* ── ONBOARDING EMPTY STATE ── */
+        <div className="space-y-6">
+          {/* Hero banner */}
+          <div className="bg-gradient-to-br from-violet-600/20 via-violet-500/10 to-transparent border border-violet-500/20 rounded-2xl p-8 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center mx-auto mb-4">
+              <Sparkles size={30} className="text-violet-400" />
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2">Build your first AI agent</h2>
+            <p className="text-slate-400 text-sm max-w-sm mx-auto leading-relaxed">
+              Choose a template below to get started in seconds — or build from scratch. Your agent will be live and ready to chat in minutes.
+            </p>
+          </div>
+
+          {/* Template cards */}
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">Start with a template</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {AGENT_TEMPLATES.map(tpl => (
+                <button
+                  key={tpl.id}
+                  onClick={() => navigate('/dashboard/agents/new', { state: { template: tpl } })}
+                  className="group text-left bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 hover:border-violet-500/40 hover:bg-violet-500/[0.04] transition-all"
+                >
+                  <div className={`w-11 h-11 rounded-xl ${tpl.bg} border ${tpl.border} flex items-center justify-center mb-4`}>
+                    <tpl.icon size={20} className={tpl.color} />
+                  </div>
+                  <h3 className="font-bold text-white text-sm mb-1">{tpl.name}</h3>
+                  <p className="text-xs text-slate-500 leading-relaxed mb-4">{tpl.desc}</p>
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-violet-400 group-hover:text-violet-300 transition-colors">
+                    Use template <ArrowRight size={12} />
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom / blank */}
+          <button
+            onClick={() => navigate('/dashboard/agents/new')}
+            className="w-full border border-dashed border-[#1e1e2e] rounded-xl p-4 flex items-center justify-center gap-2 hover:border-violet-500/40 hover:bg-violet-500/5 transition-all group"
+          >
+            <div className="w-8 h-8 rounded-full bg-white/5 group-hover:bg-violet-500/10 flex items-center justify-center transition-colors">
+              <Plus size={16} className="text-slate-600 group-hover:text-violet-400" />
+            </div>
+            <span className="text-sm font-semibold text-slate-600 group-hover:text-violet-400 transition-colors">Start from scratch</span>
           </button>
         </div>
       ) : (

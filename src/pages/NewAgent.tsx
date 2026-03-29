@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import { Plus, X, Upload, Check, ChevronRight, ChevronLeft, Rocket, Bot } from 'lucide-react'
 
@@ -69,8 +69,24 @@ const defaultState: WizardState = {
 
 export default function NewAgent() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [step, setStep] = useState(0)
-  const [state, setState] = useState<WizardState>(defaultState)
+  const [state, setState] = useState<WizardState>(() => {
+    // Pre-fill from template passed via router state (from Agents onboarding)
+    const tpl = (location.state as any)?.template
+    if (tpl) {
+      return {
+        ...defaultState,
+        selectedTemplate: tpl.id,
+        name: tpl.name,
+        systemPrompt: tpl.systemPrompt,
+        adjectives: tpl.adjectives || defaultState.adjectives,
+        tone: tpl.tone || defaultState.tone,
+        commStyle: tpl.commStyle || defaultState.commStyle,
+      }
+    }
+    return defaultState
+  })
   const [newTag, setNewTag] = useState('')
   const [newTopic, setNewTopic] = useState('')
   const [newCmd, setNewCmd] = useState({ name: '', desc: '' })
