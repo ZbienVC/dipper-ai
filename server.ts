@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -628,7 +628,8 @@ function startAutomationRunner() {
   }, 60000);
 }
 
-// ─── In-memory cron runner ────────────────────────────────────────────────────function parseCronMinute(expr: string): boolean {
+// in-memory cron runner
+function parseCronMinute(expr: string): boolean {
   try {
     const parts = expr.trim().split(/\s+/);
     if (parts.length !== 5) return false;
