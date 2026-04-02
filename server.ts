@@ -1472,9 +1472,66 @@ async function startServer() {
   });
 
   app.get('/api/analytics', auth, (req: any, res) => {
-    const agents = db.data.agents.filter(a => a.user_id === req.userId && a.is_active);
-    const totalMessages = agents.reduce((sum, a) => sum + a.total_messages, 0);
-    res.json({ agents: agents.map(a => ({ id: a.id, name: a.name, emoji: a.emoji, total_messages: a.total_messages })), totalMessages });
+    const daysParam = parseInt((req.query as any).days as string) || 30;
+    const days = Math.min(daysParam, 90);
+    const userId = req.userId;
+    const agents = db.data.agents.filter((a: any) => a.user_id === userId && a.is_active);
+    const allLogs = (db.data.activity_logs || []).filter((l: any) => l.user_id === userId);
+    const msgLogs = allLogs.filter((l: any) => l.event_type === 'message_sent');
+    const dayMap: Record<string, number> = {};
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000).toISOString().split('T')[0];
+      dayMap[d] = 0;
+    }
+    for (const log of msgLogs) {
+      const d = log.created_at.split('T')[0];
+      if (dayMap[d] !== undefined) dayMap[d]++;
+    }
+    const dailyMessages = Object.entries(dayMap).map(([date, value]) => {
+      const dt = new Date(date);
+      const label = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      return { label, value, date };
+    });
+    const totalMessages = agents.reduce((s: number, a: any) => s + (a.total_messages || 0), 0);
+    const withLatency = allLogs.filter((l: any) => (l as any).latency_ms != null && (l as any).latency_ms > 0);
+    const avgResponseMs = withLatency.length > 0
+      ? Math.round(withLatency.reduce((s: number, l: any) => s + (l.latency_ms || 0), 0) / withLatency.length) : 0;
+    const chanMap: Record<string, number> = {};
+    for (const l of msgLogs) chanMap[(l as any).channel] = (chanMap[(l as any).channel] || 0) + 1;
+    const chanTotal = Object.values(chanMap).reduce((s, v) => s + v, 0) || 1;
+    const channelBreakdown = Object.entries(chanMap).map(([label, count]) => ({
+      label: label.charAt(0).toUpperCase() + label.slice(1), count,
+      pct: Math.round((count / chanTotal) * 100),
+    })).sort((a, b) => b.count - a.count);
+    const buckets = [0, 0, 0, 0, 0];
+    for (const l of withLatency) {
+      const ms = (l as any).latency_ms || 0;
+      if (ms < 1000) buckets[0]++;
+      else if (ms < 2000) buckets[1]++;
+      else if (ms < 3000) buckets[2]++;
+      else if (ms < 5000) buckets[3]++;
+      else buckets[4]++;
+    }
+    const bt = buckets.reduce((s, v) => s + v, 0) || 1;
+    const responseTimeBuckets = [
+      { label: '< 1s', pct: Math.round((buckets[0] / bt) * 100) },
+      { label: '1-2s', pct: Math.round((buckets[1] / bt) * 100) },
+      { label: '2-3s', pct: Math.round((buckets[2] / bt) * 100) },
+      { label: '3-5s', pct: Math.round((buckets[3] / bt) * 100) },
+      { label: '> 5s', pct: Math.round((buckets[4] / bt) * 100) },
+    ];
+    const COLORS = ['bg-violet-500', 'bg-blue-500', 'bg-green-500', 'bg-indigo-500', 'bg-amber-500'];
+    const agentBreakdown = agents
+      .map((a: any, i: number) => ({ name: a.name, messages: a.total_messages || 0, color: COLORS[i % COLORS.length] }))
+      .sort((a: any, b: any) => b.messages - a.messages).slice(0, 5);
+    const heatmap: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+    for (const l of msgLogs) {
+      if ((l as any).created_at < sevenDaysAgo) continue;
+      const d = new Date((l as any).created_at);
+      heatmap[d.getDay()][d.getHours()]++;
+    }
+    res.json({ totalMessages, avgResponseMs, satisfactionScore: 0, dailyMessages, channelBreakdown, responseTimeBuckets, agentBreakdown, hourlyHeatmap: heatmap });
   });
 
   // Per-agent detailed analytics with time-series (last 30 days)
@@ -3642,6 +3699,83 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     }
 
     res.json(insights.slice(0, 5));
+  });
+
+
+  // *** Approvals API ***
+  app.get('/api/approvals', auth, (req: any, res) => {
+    if (!db.data.approvals) db.data.approvals = [];
+    const { status } = req.query as any;
+    let items = (db.data.approvals as any[]).filter((a: any) => a.user_id === req.userId);
+    if (status) items = items.filter((a: any) => a.status === status);
+    res.json(items.sort((a: any, b: any) => b.created_at - a.created_at).slice(0, 100));
+  });
+  app.post('/api/approvals/:id/approve', auth, (req: any, res) => {
+    if (!db.data.approvals) return res.status(404).json({ error: 'Not found' });
+    const approval = (db.data.approvals as any[]).find((a: any) => a.id === req.params.id && a.user_id === req.userId);
+    if (!approval) return res.status(404).json({ error: 'Not found' });
+    approval.status = 'approved'; approval.resolved_at = Date.now(); save();
+    res.json({ ok: true });
+  });
+  app.post('/api/approvals/:id/reject', auth, (req: any, res) => {
+    if (!db.data.approvals) return res.status(404).json({ error: 'Not found' });
+    const approval = (db.data.approvals as any[]).find((a: any) => a.id === req.params.id && a.user_id === req.userId);
+    if (!approval) return res.status(404).json({ error: 'Not found' });
+    const { reason } = req.body;
+    approval.status = 'rejected'; approval.rejection_reason = reason || ''; approval.resolved_at = Date.now(); save();
+    res.json({ ok: true });
+  });
+  app.delete('/api/approvals/:id', auth, (req: any, res) => {
+    if (!db.data.approvals) return res.json({ ok: true });
+    const idx = (db.data.approvals as any[]).findIndex((a: any) => a.id === req.params.id && a.user_id === req.userId);
+    if (idx !== -1) { (db.data.approvals as any[]).splice(idx, 1); save(); }
+    res.json({ ok: true });
+  });
+
+  // *** Settings API Keys ***
+  app.get('/api/settings/api-keys', auth, (req: any, res) => {
+    if (!db.data.api_keys) db.data.api_keys = [];
+    const keys = (db.data.api_keys as any[])
+      .filter((k: any) => k.user_id === req.userId)
+      .map((k: any) => ({ id: k.id, name: k.name, key_preview: k.key_preview, created_at: k.created_at, last_used: k.last_used }));
+    res.json(keys);
+  });
+  app.post('/api/settings/api-keys', auth, (req: any, res) => {
+    if (!db.data.api_keys) db.data.api_keys = [];
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name required' });
+    const crypto = require('crypto');
+    const key = 'dpr_' + crypto.randomBytes(24).toString('hex');
+    const id = randomUUID();
+    const preview = key.slice(0, 8) + '...' + key.slice(-4);
+    (db.data.api_keys as any[]).push({ id, user_id: req.userId, name, key, key_preview: preview, created_at: Date.now() });
+    save();
+    res.json({ id, name, key, key_preview: preview, created_at: Date.now() });
+  });
+  app.delete('/api/settings/api-keys/:id', auth, (req: any, res) => {
+    if (!db.data.api_keys) return res.json({ ok: true });
+    const idx = (db.data.api_keys as any[]).findIndex((k: any) => k.id === req.params.id && k.user_id === req.userId);
+    if (idx !== -1) { (db.data.api_keys as any[]).splice(idx, 1); save(); }
+    res.json({ ok: true });
+  });
+
+  // *** Playground Chat ***
+  app.post('/api/playground/chat', auth, async (req: any, res) => {
+    const { agentId, message, channel, history = [] } = req.body;
+    if (!agentId || !message) return res.status(400).json({ error: 'agentId and message required' });
+    const agent = findAgent(agentId, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    if (!checkLimit(req.user, 'messages')) return res.status(429).json({ error: 'Daily message limit reached.' });
+    try {
+      const msgs = [...(history as any[]).slice(-10).map((m: any) => ({ role: m.role, content: m.content })), { role: 'user', content: message }];
+      const plan = PLANS[req.user.plan] || PLANS.free;
+      const effectiveModel = getEffectiveModel(req.user, agent.model);
+      const provider = effectiveModel.startsWith('gpt') ? 'openai' : effectiveModel.startsWith('gemini') ? 'google' : 'anthropic';
+      const { text: reply } = await callAI(provider, effectiveModel, buildAgentSystemPrompt(agent), msgs, plan.maxTokens);
+      req.user.messages_today++; agent.total_messages++; save();
+      logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: channel || 'web', summary: 'Playground chat', details: reply.slice(0, 200), model_used: effectiveModel, status: 'success' });
+      res.json({ reply });
+    } catch (e: any) { res.status(500).json({ error: e?.message || 'AI call failed' }); }
   });
 
   // ─── Frontend ─────────────────────────────────────────────────────────────

@@ -101,7 +101,6 @@ export default function Playground() {
 
     try {
       const token = getToken()
-      const history = messages.map(m => ({ role: m.role, content: m.content }))
 
       const res = await fetch('/api/playground/chat', {
         method: 'POST',
@@ -113,12 +112,15 @@ export default function Playground() {
           agentId: selectedAgent.id,
           message: userMsg.content,
           channel: selectedChannel.id,
-          history,
+          history: messages.map(m => ({ role: m.role, content: m.content })),
         }),
       })
 
       setIsTyping(false)
 
+      setIsTyping(false)
+
+      setIsTyping(false)
       if (res.ok) {
         const data = await res.json()
         const botMsg: Message = {
@@ -129,16 +131,11 @@ export default function Playground() {
         }
         setMessages(prev => [...prev, botMsg])
       } else {
-        // Fallback mock response if API not wired
-        const mockReplies = [
-          `Hi! I'm ${selectedAgent.name}. I received your message: "${userMsg.content}". How can I help you further?`,
-          `Thanks for reaching out! As ${selectedAgent.name}, I'm here to assist. What else would you like to know?`,
-          `Great question! I'm ${selectedAgent.name} and I'd be happy to help with that. Let me look into it for you.`,
-        ]
+        const errData = await res.json().catch(() => ({}))
         const botMsg: Message = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: mockReplies[Math.floor(Math.random() * mockReplies.length)],
+          content: `Could not reach agent — check your API connection. ${errData.error || ''}`.trim(),
           timestamp: new Date(),
         }
         setMessages(prev => [...prev, botMsg])
@@ -148,7 +145,7 @@ export default function Playground() {
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `Hello! I'm ${selectedAgent?.name || 'your AI agent'}. I'm ready to help — connect me to a real AI provider in your agent settings to enable live responses.`,
+        content: 'Could not reach agent — check your API connection.',
         timestamp: new Date(),
       }
       setMessages(prev => [...prev, botMsg])

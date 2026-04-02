@@ -144,7 +144,18 @@ export default function NewAgent() {
   })
   const [launched, setLaunched] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [connectedChannels] = useState<string[]>(['telegram']) // mock — would come from API
+  const [connectedChannels, setConnectedChannels] = useState<string[]>([])
+  useEffect(() => {
+    const token = localStorage.getItem('token') || (() => { try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null } })()
+    if (!token) return
+    fetch('/api/integrations', { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then((integrations: any[]) => {
+        const connected = integrations.filter(i => i.connected).map((i: any) => i.type)
+        setConnectedChannels(connected)
+      })
+      .catch(() => {})
+  }, [])
 
   const update = (patch: Partial<WizardState>) => setState(prev => ({ ...prev, ...patch }))
 
@@ -415,7 +426,7 @@ export default function NewAgent() {
         })}
       </div>
       <button onClick={() => update({ enabledChannels: [] })} className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
-        Skip for now — add channels after launch
+        Skip for now - add channels after launch
       </button>
     </div>
   )
@@ -468,7 +479,7 @@ export default function NewAgent() {
         </div>
 
         {!state.name && (
-          <p className="text-amber-400 text-xs flex items-center gap-1.5">⚠ No name set — go back to Step 2 to name your agent.</p>
+          <p className="text-amber-400 text-xs flex items-center gap-1.5">⚠ No name set - go back to Step 2 to name your agent.</p>
         )}
 
         <button onClick={handleLaunch} disabled={saving}
