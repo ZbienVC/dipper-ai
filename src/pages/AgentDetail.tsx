@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+﻿import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import {
@@ -405,7 +405,18 @@ export default function AgentDetail() {
     </div>
   )
 
-  const renderChat = () => (
+  const renderChat = () => {
+    const agentCategory = agent?.template_id || 'custom'
+    const sampleInputs: Record<string, string[]> = {
+      'customer-support': ['What are your business hours?', 'I need to return my order', 'My item arrived damaged', 'How long does shipping take?', 'Can you help me track my package?'],
+      'lead-gen': ['Tell me more about your services', 'How much does it cost?', 'Can I schedule a demo?', 'What makes you different from competitors?', 'Do you offer a free trial?'],
+      'sales': ['What plans do you offer?', 'Is there a discount for annual billing?', 'Can I see a case study?', "What's your refund policy?", 'How do I get started?'],
+      'community': ['How do I get verified?', "What are the community rules?", 'Who do I contact for help?', 'How do I share my work here?', 'Where do I introduce myself?'],
+      'custom': ['What can you help me with?', 'Tell me about yourself', 'How does this work?', 'What are your main features?', 'Give me an example of what you can do'],
+    }
+    const samples = sampleInputs[agentCategory] || sampleInputs['custom']
+
+    return (
     <div className="space-y-3">
       {memoriesTotal > 0 && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-violet-500/10 border border-violet-500/20 rounded-xl text-sm text-violet-300">
@@ -413,6 +424,23 @@ export default function AgentDetail() {
           <span>Memory active — this agent remembers past interactions</span>
         </div>
       )}
+
+      {/* Sample test messages */}
+      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4">
+        <p className="text-xs font-semibold text-slate-400 mb-2">🧪 Test with sample inputs</p>
+        <div className="flex flex-wrap gap-2">
+          {samples.map((sample, i) => (
+            <button
+              key={i}
+              onClick={() => { setInputText(sample) }}
+              className="px-3 py-1.5 rounded-lg text-xs border border-[#1e1e2e] text-slate-400 hover:border-violet-500/40 hover:text-violet-300 hover:bg-violet-500/5 transition-all"
+            >
+              {sample}
+            </button>
+          ))}
+        </div>
+      </div>
+
     <div className="flex flex-col h-[580px] bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
       <div className="px-4 py-3 border-b border-[#1e1e2e] flex items-center gap-3">
         <div className="w-8 h-8 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-sm">
@@ -502,6 +530,7 @@ export default function AgentDetail() {
     </div>
     </div>
   )
+  }
 
   const renderPersonality = () => (
     <div className="space-y-5 bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
@@ -1114,6 +1143,88 @@ export default function AgentDetail() {
                     style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
                     title="Chat Widget Preview"
                   />
+                </div>
+              </div>
+
+              {/* White-Label Customization */}
+              <div className="border border-[#1e1e2e] rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <h4 className="text-sm font-semibold text-white">Widget Customization</h4>
+                  {usageStats && (
+                    <span className="text-[10px] bg-violet-500/10 text-violet-400 border border-violet-500/20 px-1.5 py-0.5 rounded font-bold">Business</span>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">Primary Color</label>
+                    <div className="flex items-center gap-2">
+                      <input type="color" defaultValue="#7c3aed"
+                        className="w-9 h-9 rounded-lg border border-[#1e1e2e] bg-transparent cursor-pointer"
+                        onChange={e => {
+                          const config = JSON.parse(agent?.embed_config || '{}')
+                          config.primaryColor = e.target.value
+                          fetch(`/api/agents/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ embed_config: JSON.stringify(config) }) }).catch(() => {})
+                        }}
+                      />
+                      <span className="text-xs text-slate-500">Widget accent color</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">Widget Position</label>
+                    <select defaultValue="bottom-right"
+                      className="w-full px-3 py-1.5 rounded-lg bg-white/5 border border-[#1e1e2e] text-slate-300 text-xs focus:outline-none"
+                      onChange={e => {
+                        const config = JSON.parse(agent?.embed_config || '{}')
+                        config.position = e.target.value
+                        fetch(`/api/agents/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ embed_config: JSON.stringify(config) }) }).catch(() => {})
+                      }}
+                    >
+                      <option value="bottom-right">Bottom Right</option>
+                      <option value="bottom-left">Bottom Left</option>
+                      <option value="inline">Inline</option>
+                    </select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">Greeting Message</label>
+                    <input type="text" placeholder="Hi! How can I help you today?"
+                      defaultValue={JSON.parse(agent?.embed_config || '{}').greeting || ''}
+                      className="w-full px-3 py-1.5 rounded-lg bg-white/5 border border-[#1e1e2e] text-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500/50 placeholder-slate-600"
+                      onBlur={e => {
+                        const config = JSON.parse(agent?.embed_config || '{}')
+                        config.greeting = e.target.value
+                        fetch(`/api/agents/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ embed_config: JSON.stringify(config) }) }).catch(() => {})
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">Custom Avatar URL</label>
+                    <input type="text" placeholder="https://example.com/avatar.png"
+                      defaultValue={JSON.parse(agent?.embed_config || '{}').avatarUrl || ''}
+                      className="w-full px-3 py-1.5 rounded-lg bg-white/5 border border-[#1e1e2e] text-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500/50 placeholder-slate-600"
+                      onBlur={e => {
+                        const config = JSON.parse(agent?.embed_config || '{}')
+                        config.avatarUrl = e.target.value
+                        fetch(`/api/agents/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ embed_config: JSON.stringify(config) }) }).catch(() => {})
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1">Hide Branding</label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox"
+                          defaultChecked={JSON.parse(agent?.embed_config || '{}').hideBranding || false}
+                          className="rounded border-[#1e1e2e]"
+                          onChange={e => {
+                            const config = JSON.parse(agent?.embed_config || '{}')
+                            config.hideBranding = e.target.checked
+                            fetch(`/api/agents/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ embed_config: JSON.stringify(config) }) }).catch(() => {})
+                          }}
+                        />
+                        <span className="text-xs text-slate-400">Hide "Powered by DipperAI"</span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
