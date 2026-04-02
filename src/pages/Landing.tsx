@@ -342,6 +342,66 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Use Cases */}
+      <section className="py-24 px-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl font-extrabold text-white mb-4">Built for every use case</h2>
+            <p className="text-lg text-slate-500 max-w-2xl mx-auto">Whether you're handling support, generating leads, or booking appointments — DipperAI has you covered.</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {useCases.map(uc => (
+              <div key={uc.title} className="bg-[#111118] border border-[#1e1e2e] rounded-2xl p-6 hover:border-violet-500/30 transition-colors group">
+                <div className="text-3xl mb-4">{uc.emoji}</div>
+                <h3 className="font-bold text-white text-base mb-2">{uc.title}</h3>
+                <p className="text-slate-500 text-sm leading-relaxed">{uc.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Comparison Table */}
+      <section className="py-24 px-6 bg-[#0d0d15] border-y border-[#1e1e2e]">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-4xl font-extrabold text-white mb-4">How DipperAI compares</h2>
+            <p className="text-lg text-slate-500">More channels, more models, more control — at a fraction of the cost.</p>
+          </div>
+          <div className="bg-[#111118] border border-[#1e1e2e] rounded-2xl overflow-hidden">
+            <div className="grid grid-cols-4 bg-white/5 border-b border-[#1e1e2e]">
+              <div className="p-4 col-span-1" />
+              <div className="p-4 text-center">
+                <div className="flex items-center justify-center gap-1.5">
+                  <div className="w-5 h-5 rounded flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}><Zap size={10} className="text-white" /></div>
+                  <span className="font-bold text-white text-sm">DipperAI</span>
+                </div>
+              </div>
+              <div className="p-4 text-center">
+                <span className="font-semibold text-slate-400 text-sm">Botpress</span>
+              </div>
+              <div className="p-4 text-center">
+                <span className="font-semibold text-slate-400 text-sm">ManyChat</span>
+              </div>
+            </div>
+            {comparisonRows.map((row, i) => (
+              <div key={row.feature} className={`grid grid-cols-4 border-b border-[#1e1e2e] last:border-0 ${i % 2 === 0 ? '' : 'bg-white/[0.02]'}`}>
+                <div className="p-4 text-sm text-slate-400 flex items-center">{row.feature}</div>
+                <div className="p-4 flex items-center justify-center">
+                  {row.dipper ? <Check size={16} className="text-violet-400" /> : <X size={16} className="text-slate-700" />}
+                </div>
+                <div className="p-4 flex items-center justify-center">
+                  {row.botpress ? <Check size={16} className="text-slate-500" /> : <X size={16} className="text-slate-700" />}
+                </div>
+                <div className="p-4 flex items-center justify-center">
+                  {row.manychat ? <Check size={16} className="text-slate-500" /> : <X size={16} className="text-slate-700" />}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Pricing */}
       <section id="pricing" className="py-24 px-6">
         <div className="max-w-5xl mx-auto">
@@ -395,7 +455,7 @@ export default function Landing() {
           <h2 className="text-3xl font-extrabold text-white mb-4">Ready to deploy your first agent?</h2>
           <p className="text-slate-400 mb-8">Join thousands of businesses automating conversations with DipperAI.</p>
           <Link to="/signup" className="gradient-btn inline-flex items-center gap-2 font-bold px-8 py-3.5 rounded-xl text-base">
-            Start Building for Free <ArrowRight size={18} />
+            Start Free — No Credit Card Required <ArrowRight size={18} />
           </Link>
         </div>
       </section>
