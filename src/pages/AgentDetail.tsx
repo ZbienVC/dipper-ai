@@ -83,6 +83,21 @@ export default function AgentDetail() {
   const [embedToggling, setEmbedToggling] = useState(false)
   const [copiedKey, setCopiedKey] = useState('')
 
+  // Analytics/metrics state
+  const [metrics, setMetrics] = useState<any[]>([])
+  const [metricsLoading, setMetricsLoading] = useState(false)
+
+  // Always-on state
+  const [alwaysOn, setAlwaysOn] = useState(false)
+  const [alwaysOnToggling, setAlwaysOnToggling] = useState(false)
+
+  // Settings tab state
+  const [settingsName, setSettingsName] = useState('')
+  const [settingsDesc, setSettingsDesc] = useState('')
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsSaved, setSettingsSaved] = useState(false)
+  const [agentDeleteConfirm, setAgentDeleteConfirm] = useState(false)
+
   // Memory/users state
   const [memories, setMemories] = useState<any[]>([])
   const [memoriesTotal, setMemoriesTotal] = useState(0)
@@ -138,6 +153,9 @@ export default function AgentDetail() {
       setEditTopics(agent.description || '')
       setMessages([{ role: 'agent', text: `Hey! I'm ${agent.name}. How can I help you today?`, ts: getTime() }])
       setEmbedEnabled(!!agent.deployed_embed_enabled)
+      setAlwaysOn(!!agent.always_on)
+      setSettingsName(agent.name || '')
+      setSettingsDesc(agent.description || '')
     }
   }, [agent?.id])
 
@@ -182,6 +200,66 @@ export default function AgentDetail() {
         .finally(() => setMemoriesLoading(false))
     }
   }, [activeTab, agent?.id])
+
+  // Load metrics when analytics tab is activated
+  useEffect(() => {
+    if (activeTab === 'analytics' && agent) {
+      const token = getToken()
+      if (!token) return
+      setMetricsLoading(true)
+      fetch(`/api/agents/${agent.id}/intelligence/metrics`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : [])
+        .then((d: any[]) => setMetrics(Array.isArray(d) ? d : []))
+        .catch(() => setMetrics([]))
+        .finally(() => setMetricsLoading(false))
+    }
+  }, [activeTab, agent?.id])
+
+  const toggleAlwaysOn = async () => {
+    const token = getToken()
+    if (!token || !agent) return
+    setAlwaysOnToggling(true)
+    try {
+      const res = await fetch(`/api/agents/${id}/always-on`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ always_on: !alwaysOn }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setAlwaysOn(!!updated.always_on)
+        setAgent((prev: any) => ({ ...prev, always_on: updated.always_on }))
+      }
+    } catch {}
+    setAlwaysOnToggling(false)
+  }
+
+  const handleSaveSettings = async () => {
+    const token = getToken()
+    if (!token || !agent) return
+    setSettingsSaving(true)
+    try {
+      const res = await fetch(`/api/agents/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: settingsName.trim(), description: settingsDesc.trim() }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setAgent(updated)
+        setSettingsSaved(true)
+        setTimeout(() => setSettingsSaved(false), 2000)
+      }
+    } catch {}
+    setSettingsSaving(false)
+  }
+
+  const handleDeleteAgent = async () => {
+    const token = getToken()
+    if (!token) return
+    await fetch(`/api/agents/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => {})
+    navigate('/dashboard/agents')
+  }
 
   const sendMessage = async () => {
     if (!inputText.trim() || thinking || !agent) return
@@ -1214,6 +1292,166 @@ export default function AgentDetail() {
     </div>
   )
 
+  const renderAnalytics = () => {
+    const totalMessages = metrics.reduce((s, m) => s + (m.messages_sent || 0), 0)
+    const avgResponse = metrics.length > 0
+      ? Math.round(metrics.reduce((s, m) => s + (m.avg_response_ms || 0), 0) / metrics.filter(m => m.avg_response_ms > 0).length || 0)
+      : 0
+    const avgSatisfaction = metrics.length > 0
+      ? (metrics.reduce((s, m) => s + (m.satisfaction_score || 0), 0) / metrics.filter(m => m.satisfaction_score > 0).length || 0).toFixed(1)
+      : '—'
+    const maxMessages = Math.max(...metrics.map(m => m.messages_sent || 0), 1)
+
+    return (
+      <div className="space-y-5">
+        <div>
+          <h2 className="text-base font-bold text-white flex items-center gap-2"><BarChart2 size={16} className="text-violet-400" /> Analytics</h2>
+          <p className="text-xs text-slate-500 mt-0.5">Last 30 days of activity</p>
+        </div>
+
+        {metricsLoading ? (
+          <div className="flex items-center justify-center py-16"><Loader2 size={24} className="animate-spin text-violet-400" /></div>
+        ) : metrics.length === 0 ? (
+          <div className="bg-[#111118] border border-dashed border-[#1e1e2e] rounded-xl p-16 text-center">
+            <BarChart2 size={28} className="text-slate-700 mx-auto mb-3" />
+            <p className="font-semibold text-slate-400 mb-1">No data yet</p>
+            <p className="text-sm text-slate-600">Start chatting with your agent to see metrics here.</p>
+          </div>
+        ) : (
+          <>
+            {/* Summary cards */}
+            <div className="grid grid-cols-3 gap-4">
+              {[
+                { label: 'Total Messages', value: totalMessages.toLocaleString(), color: 'text-violet-400', border: 'border-violet-500/20', bg: 'bg-violet-500/10' },
+                { label: 'Avg Response', value: avgResponse > 0 ? `${(avgResponse / 1000).toFixed(1)}s` : '—', color: 'text-blue-400', border: 'border-blue-500/20', bg: 'bg-blue-500/10' },
+                { label: 'Satisfaction', value: avgSatisfaction, color: 'text-green-400', border: 'border-green-500/20', bg: 'bg-green-500/10' },
+              ].map(stat => (
+                <div key={stat.label} className={`bg-[#111118] border ${stat.border} rounded-xl p-4`}>
+                  <div className={`w-8 h-8 rounded-lg ${stat.bg} flex items-center justify-center mb-3`}>
+                    <Activity size={14} className={stat.color} />
+                  </div>
+                  <p className={`text-xl font-bold ${stat.color}`}>{stat.value}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{stat.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Bar chart */}
+            <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+              <h3 className="text-sm font-semibold text-white mb-4">Daily Messages</h3>
+              <div className="flex items-end gap-1 h-32">
+                {[...metrics].reverse().slice(0, 30).map((m, i) => {
+                  const height = Math.max((m.messages_sent / maxMessages) * 100, m.messages_sent > 0 ? 8 : 2)
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
+                      <div
+                        className="w-full rounded-t-sm bg-violet-500/50 hover:bg-violet-500 transition-colors"
+                        style={{ height: `${height}%` }}
+                        title={`${m.date}: ${m.messages_sent} messages`}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="flex justify-between mt-2 text-xs text-slate-600">
+                <span>{metrics.length > 0 ? [...metrics].reverse()[metrics.length - 1]?.date?.slice(5) : ''}</span>
+                <span>Today</span>
+              </div>
+            </div>
+
+            {/* Daily table */}
+            <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[#1e1e2e]">
+                    <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">Date</th>
+                    <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">Messages</th>
+                    <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">Avg Response</th>
+                    <th className="text-right text-xs font-semibold text-slate-500 px-4 py-3">Satisfaction</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {metrics.slice(0, 10).map((m, i) => (
+                    <tr key={i} className="border-b border-[#1e1e2e] last:border-0 hover:bg-white/5 transition-colors">
+                      <td className="px-4 py-3 text-white font-mono text-xs">{m.date}</td>
+                      <td className="px-4 py-3 text-right text-violet-400 font-semibold">{m.messages_sent}</td>
+                      <td className="px-4 py-3 text-right text-slate-400">{m.avg_response_ms > 0 ? `${(m.avg_response_ms / 1000).toFixed(1)}s` : '—'}</td>
+                      <td className="px-4 py-3 text-right text-slate-400">{m.satisfaction_score > 0 ? m.satisfaction_score.toFixed(1) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
+  const renderSettings = () => (
+    <div className="space-y-5">
+      {/* Always-On */}
+      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-white text-sm flex items-center gap-2">
+              <RefreshCw size={14} className="text-violet-400" /> Always-On Mode
+            </h3>
+            <p className="text-xs text-slate-500 mt-1">When enabled, the agent runs a periodic heartbeat to stay active and process queued messages automatically.</p>
+          </div>
+          <button onClick={toggleAlwaysOn} disabled={alwaysOnToggling}
+            className="ml-4 flex items-center gap-2 text-sm transition-colors flex-shrink-0">
+            {alwaysOnToggling ? (
+              <Loader2 size={22} className="animate-spin text-violet-400" />
+            ) : alwaysOn ? (
+              <ToggleRight size={28} className="text-violet-400" />
+            ) : (
+              <ToggleLeft size={28} className="text-slate-500" />
+            )}
+            <span className={alwaysOn ? 'text-violet-400 font-semibold text-sm' : 'text-slate-500 text-sm'}>
+              {alwaysOn ? 'On' : 'Off'}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* Basic info */}
+      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 space-y-4">
+        <h3 className="font-semibold text-white text-sm flex items-center gap-2"><Settings size={14} className="text-violet-400" /> Agent Info</h3>
+        <div>
+          <label className="block text-xs font-semibold text-slate-400 mb-1.5">Name</label>
+          <input value={settingsName} onChange={e => setSettingsName(e.target.value)} className={inputClass} placeholder="Agent name" />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-400 mb-1.5">Description</label>
+          <input value={settingsDesc} onChange={e => setSettingsDesc(e.target.value)} className={inputClass} placeholder="Short description" />
+        </div>
+        <button onClick={handleSaveSettings} disabled={settingsSaving}
+          className={`flex items-center gap-2 px-5 py-2 rounded-xl font-semibold text-sm transition-all ${settingsSaved ? 'bg-green-500 text-white' : 'gradient-btn'}`}>
+          {settingsSaving ? <Loader2 size={14} className="animate-spin" /> : settingsSaved ? <><Check size={14} /> Saved!</> : <><Save size={14} /> Save Changes</>}
+        </button>
+      </div>
+
+      {/* Danger zone */}
+      <div className="bg-[#111118] border border-red-500/20 rounded-xl p-5">
+        <h3 className="font-semibold text-red-400 text-sm mb-1 flex items-center gap-2"><AlertCircle size={14} /> Danger Zone</h3>
+        <p className="text-xs text-slate-500 mb-4">Permanently delete this agent and all its data. This cannot be undone.</p>
+        {agentDeleteConfirm ? (
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-red-300 flex-1">Are you absolutely sure?</p>
+            <button onClick={() => setAgentDeleteConfirm(false)} className="px-3 py-1.5 rounded-lg border border-[#1e1e2e] text-slate-400 text-xs font-semibold hover:bg-white/5">Cancel</button>
+            <button onClick={handleDeleteAgent} className="px-3 py-1.5 rounded-lg bg-red-500 text-white text-xs font-semibold hover:bg-red-600">Delete Agent</button>
+          </div>
+        ) : (
+          <button onClick={() => setAgentDeleteConfirm(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-red-500/20 text-red-400 hover:bg-red-500/10 text-sm font-semibold transition-all">
+            <Trash2 size={14} /> Delete Agent
+          </button>
+        )}
+      </div>
+    </div>
+  )
+
   const renderEmptyTab = (tab: string) => (
     <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-16 text-center">
       <div className="w-14 h-14 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto mb-4">
@@ -1228,7 +1466,7 @@ export default function AgentDetail() {
     overview: renderOverview, chat: renderChat, users: renderUsers, personality: renderPersonality, knowledge: renderKnowledge,
     commands: renderCommands, integrations: renderAgentIntegrations,
     deploy: renderDeploy,
-    analytics: () => renderEmptyTab('analytics'), settings: () => renderEmptyTab('settings'),
+    analytics: renderAnalytics, settings: renderSettings,
   }
 
   if (agentLoading) {
@@ -1277,6 +1515,13 @@ export default function AgentDetail() {
             <p className="text-slate-500 text-sm mb-2">{agent.description || 'Custom Agent'} · {agent.model}</p>
             <div className="flex items-center gap-4 flex-wrap text-sm text-slate-500">
               <span className="flex items-center gap-1.5"><MessageSquare size={13} className="text-violet-400" /> {(agent.total_messages || 0).toLocaleString()} messages</span>
+              <button onClick={toggleAlwaysOn} disabled={alwaysOnToggling}
+                title="Always-On Mode"
+                className="flex items-center gap-1 text-xs transition-colors hover:opacity-80">
+                {alwaysOnToggling ? <Loader2 size={14} className="animate-spin text-violet-400" /> :
+                  alwaysOn ? <ToggleRight size={18} className="text-violet-400" /> : <ToggleLeft size={18} className="text-slate-500" />}
+                <span className={alwaysOn ? 'text-violet-400' : 'text-slate-500'}>Always-On</span>
+              </button>
             </div>
           </div>
           <div className="flex gap-2 flex-shrink-0">

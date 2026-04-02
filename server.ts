@@ -270,6 +270,8 @@ type DBSchema = {
   agent_metrics: AgentMetrics[];
   sms_optouts: SmsOptout[];
   broadcasts: Broadcast[];
+  approvals: Approval[];
+  api_keys: ApiKey[];
 };
 
 // ─── Plan Definitions ─────────────────────────────────────────────────────────
@@ -1109,7 +1111,7 @@ async function startServer() {
   try {
     const { JSONFileSync } = await import('lowdb/node');
     const adapter = new JSONFileSync<DBSchema>(dbPath);
-    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [], agent_long_term_memory: [], agent_metrics: [], sms_optouts: [], broadcasts: [] });
+    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [], agent_long_term_memory: [], agent_metrics: [], sms_optouts: [], broadcasts: [], approvals: [], api_keys: [] });
     try { db.read(); } catch { /* fresh */ }
     if (!db.data.scheduled_messages) db.data.scheduled_messages = [];
     if (!db.data.activity_logs) db.data.activity_logs = [];
@@ -1124,6 +1126,8 @@ async function startServer() {
     if (!db.data.agent_metrics) db.data.agent_metrics = [];
     if (!db.data.sms_optouts) db.data.sms_optouts = [];
     if (!db.data.broadcasts) db.data.broadcasts = [];
+    if (!db.data.approvals) db.data.approvals = [];
+    if (!db.data.api_keys) db.data.api_keys = [];
     db.write();
     console.log('[DipperAI] File DB:', dbPath);
   } catch {
@@ -3478,6 +3482,8 @@ Now write a comprehensive final summary of what was accomplished, combining all 
       updated_at: now,
     };
     if (!db.data.broadcasts) db.data.broadcasts = [];
+    if (!db.data.approvals) db.data.approvals = [];
+    if (!db.data.api_keys) db.data.api_keys = [];
     db.data.broadcasts.push(broadcast);
     save();
     res.json(broadcast);
