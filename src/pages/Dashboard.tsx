@@ -1,7 +1,7 @@
 ﻿import { Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
-import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3, ArrowRight, Send, Clock, Users2, Users } from 'lucide-react'
+import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3, ArrowRight, Send, Clock, Users2, Users, AlertTriangle, Lightbulb, CheckCircle2, Sparkles, Radio } from 'lucide-react'
 
 function getToken() {
   try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
@@ -34,6 +34,7 @@ export default function Dashboard() {
   const [recentActivity, setRecentActivity] = useState<any[]>([])
   const [teams, setTeams] = useState<any[]>([])
   const [leadStats, setLeadStats] = useState<{ total: number; byStage: Record<string, number>; totalValue: number } | null>(null)
+  const [insights, setInsights] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -47,7 +48,8 @@ export default function Dashboard() {
       fetch('/api/activity?limit=5', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : { logs: [] }).catch(() => ({ logs: [] })),
       fetch('/api/teams', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : []).catch(() => []),
       fetch('/api/leads/stats', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null).catch(() => null),
-    ]).then(([agentData, analyticsData, integrationData, usageData, activityData, teamsData, leadsStatsData]) => {
+      fetch('/api/insights', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : []).catch(() => []),
+    ]).then(([agentData, analyticsData, integrationData, usageData, activityData, teamsData, leadsStatsData, insightsData]) => {
       if (Array.isArray(agentData)) setAgents(agentData)
       if (analyticsData) setAnalytics(analyticsData)
       if (Array.isArray(integrationData)) setIntegrationCount(integrationData.filter((i: any) => i.connected).length)
@@ -55,6 +57,7 @@ export default function Dashboard() {
       if (activityData?.logs) setRecentActivity(activityData.logs)
       if (Array.isArray(teamsData)) setTeams(teamsData)
       if (leadsStatsData) setLeadStats(leadsStatsData)
+      if (Array.isArray(insightsData)) setInsights(insightsData)
     }).finally(() => setLoading(false))
   }, [])
 
@@ -451,6 +454,40 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Agent Insights Panel */}
+      {!loading && insights.length > 0 && (
+        <div className="mt-5 bg-[#111118] rounded-xl p-5 border border-[#1e1e2e]">
+          <div className="flex items-center gap-2 mb-4">
+            <Sparkles size={15} className="text-violet-400" />
+            <h2 className="text-sm font-semibold text-white">Insights & Recommendations</h2>
+          </div>
+          <div className="space-y-3">
+            {insights.map((insight: any) => {
+              const iconMap: Record<string, any> = { warning: AlertTriangle, tip: Lightbulb, success: CheckCircle2, opportunity: Radio }
+              const colorMap: Record<string, string> = { warning: 'text-amber-400 bg-amber-500/10 border-amber-500/20', tip: 'text-blue-400 bg-blue-500/10 border-blue-500/20', success: 'text-green-400 bg-green-500/10 border-green-500/20', opportunity: 'text-violet-400 bg-violet-500/10 border-violet-500/20' }
+              const Icon = iconMap[insight.type] || Lightbulb
+              const colorClass = colorMap[insight.type] || colorMap.tip
+              return (
+                <div key={insight.id} className={`flex items-start gap-3 p-3.5 rounded-xl border ${colorClass.split(' ').slice(1).join(' ')} bg-opacity-5`}>
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${colorClass.split(' ')[1]} ${colorClass.split(' ')[2]}`}>
+                    <Icon size={14} className={colorClass.split(' ')[0]} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-white">{insight.title}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{insight.description}</p>
+                  </div>
+                  {insight.action && insight.actionPath && (
+                    <Link to={insight.actionPath} className="text-xs font-semibold text-violet-400 hover:text-violet-300 transition-colors flex-shrink-0 mt-1">
+                      {insight.action} →
+                    </Link>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   )
 }

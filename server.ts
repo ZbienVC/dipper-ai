@@ -236,6 +236,23 @@ type SmsOptout = {
   opted_out_at: number;
 };
 
+type Broadcast = {
+  id: string;
+  user_id: string;
+  agent_id: string;
+  agent_name: string;
+  channel: 'telegram' | 'sms' | 'discord' | 'all';
+  message: string;
+  status: 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed';
+  scheduled_at?: string;
+  sent_at?: string;
+  audience_size: number;
+  sent_count: number;
+  failed_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
 type DBSchema = {
   users: User[]; agents: Agent[]; conversations: Conversation[];
   messages: Message[]; integrations: Integration[];
@@ -252,18 +269,19 @@ type DBSchema = {
   agent_long_term_memory: AgentLongTermMemory[];
   agent_metrics: AgentMetrics[];
   sms_optouts: SmsOptout[];
+  broadcasts: Broadcast[];
 };
 
 // ─── Plan Definitions ─────────────────────────────────────────────────────────
-const PLANS: Record<string, { agents: number; messagesPerDay: number; allowedModels: string[]; maxTokens: number }> = {
-  free:     { agents: 1,  messagesPerDay: 20,   allowedModels: ['claude-haiku-4-5'], maxTokens: 512  },
-  pro:      { agents: 5,  messagesPerDay: 500,  allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'gpt-4o-mini'], maxTokens: 1024 },
-  business: { agents: 25, messagesPerDay: 5000, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 2048 },
+const PLANS: Record<string, { agents: number; messagesPerMonth: number; messagesPerDay: number; integrations: number; allowedModels: string[]; maxTokens: number; price: number }> = {
+  free:     { agents: 1,   messagesPerMonth: 500,   messagesPerDay: 20,   integrations: 2,   allowedModels: ['claude-haiku-4-5'], maxTokens: 512,  price: 0  },
+  pro:      { agents: 5,   messagesPerMonth: 5000,  messagesPerDay: 200,  integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'gpt-4o-mini'], maxTokens: 1024, price: 29 },
+  business: { agents: 999, messagesPerMonth: 25000, messagesPerDay: 1000, integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 2048, price: 79 },
 };
 
 // Backward compat for code that used PLAN_LIMITS
 const PLAN_LIMITS = Object.fromEntries(
-  Object.entries(PLANS).map(([k, v]) => [k, { agents: v.agents, messagesPerDay: v.messagesPerDay }])
+  Object.entries(PLANS).map(([k, v]) => [k, { agents: v.agents, messagesPerDay: v.messagesPerDay, integrations: v.integrations }])
 );
 
 function getEffectiveModel(user: User, requestedModel: string): string {
@@ -1091,7 +1109,7 @@ async function startServer() {
   try {
     const { JSONFileSync } = await import('lowdb/node');
     const adapter = new JSONFileSync<DBSchema>(dbPath);
-    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [], agent_long_term_memory: [], agent_metrics: [], sms_optouts: [] });
+    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [], agent_long_term_memory: [], agent_metrics: [], sms_optouts: [], broadcasts: [] });
     try { db.read(); } catch { /* fresh */ }
     if (!db.data.scheduled_messages) db.data.scheduled_messages = [];
     if (!db.data.activity_logs) db.data.activity_logs = [];
@@ -1105,12 +1123,13 @@ async function startServer() {
     if (!db.data.agent_long_term_memory) db.data.agent_long_term_memory = [];
     if (!db.data.agent_metrics) db.data.agent_metrics = [];
     if (!db.data.sms_optouts) db.data.sms_optouts = [];
+    if (!db.data.broadcasts) db.data.broadcasts = [];
     db.write();
     console.log('[DipperAI] File DB:', dbPath);
   } catch {
     console.warn('[DipperAI] Read-only filesystem, using in-memory DB');
     const { MemorySync } = await import('lowdb');
-    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [], agent_long_term_memory: [], agent_metrics: [], sms_optouts: [] });
+    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [], agent_long_term_memory: [], agent_metrics: [], sms_optouts: [], broadcasts: [] });
   }
 
   startCronRunner();
@@ -1177,14 +1196,48 @@ async function startServer() {
     }
     const plan = PLANS[user.plan] || PLANS.free;
     const agentCount = db.data.agents.filter(a => a.user_id === user.id && a.is_active).length;
+    const integrationCount = db.data.integrations.filter(i => i.user_id === user.id && i.connected).length;
+    // Monthly usage from activity logs
+    const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const monthStart = new Date(currentMonth + '-01').toISOString();
+    const monthlyMessages = (db.data.activity_logs || []).filter(
+      l => l.user_id === user.id && l.event_type === 'message_sent' && l.created_at >= monthStart
+    ).length;
     res.json({
       plan: user.plan,
       messagesUsedToday: user.messages_today,
       messagesLimitToday: plan.messagesPerDay,
+      messagesUsedMonth: monthlyMessages,
+      messagesLimitMonth: plan.messagesPerMonth,
       tokensUsedToday: user.tokens_used_today || 0,
       agentsUsed: agentCount,
       agentsLimit: plan.agents,
+      integrationsUsed: integrationCount,
+      integrationsLimit: plan.integrations,
       allowedModels: plan.allowedModels,
+    });
+  });
+
+  // ─── Billing Usage ────────────────────────────────────────────────────────
+  app.get('/api/billing/usage', auth, (req: any, res) => {
+    const user: User = req.user;
+    const plan = PLANS[user.plan] || PLANS.free;
+    const agentCount = db.data.agents.filter(a => a.user_id === user.id && a.is_active).length;
+    const integrationCount = db.data.integrations.filter(i => i.user_id === user.id && i.connected).length;
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const monthStart = new Date(currentMonth + '-01').toISOString();
+    const monthlyMessages = (db.data.activity_logs || []).filter(
+      l => l.user_id === user.id && l.event_type === 'message_sent' && l.created_at >= monthStart
+    ).length;
+    res.json({
+      plan: user.plan,
+      planPrice: plan.price,
+      currentMonth,
+      usage: {
+        messages: { used: monthlyMessages, limit: plan.messagesPerMonth },
+        agents: { used: agentCount, limit: plan.agents },
+        integrations: { used: integrationCount, limit: plan.integrations },
+      },
     });
   });
 
@@ -3388,6 +3441,137 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     const taskType = detectTaskType(message);
     const optimalModel = selectOptimalModel(agent, message.length, taskType);
     res.json({ complexity, taskType, optimalModel });
+  });
+
+  // ─── Broadcasts ────────────────────────────────────────────────────────────
+
+  // GET /api/broadcasts - list all broadcasts for user
+  app.get('/api/broadcasts', auth, (req: any, res) => {
+    const broadcasts = (db.data.broadcasts || [])
+      .filter((b: Broadcast) => b.user_id === req.userId)
+      .sort((a: Broadcast, b: Broadcast) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    res.json(broadcasts);
+  });
+
+  // POST /api/broadcasts - create broadcast
+  app.post('/api/broadcasts', auth, (req: any, res) => {
+    const { agent_id, channel, message, scheduled_at } = req.body;
+    if (!message || !channel) return res.status(400).json({ error: 'message and channel required' });
+    const agent = agent_id ? db.data.agents.find((a: Agent) => a.id === agent_id && a.user_id === req.userId) : null;
+    // Estimate audience: count unique user_identifiers from leads for this user
+    const leads = (db.data.leads || []).filter((l: Lead) => l.user_id === req.userId && (channel === 'all' || l.channel === channel));
+    const audienceSize = leads.length;
+    const now = new Date().toISOString();
+    const broadcast: Broadcast = {
+      id: randomUUID(),
+      user_id: req.userId,
+      agent_id: agent_id || '',
+      agent_name: agent?.name || 'All Agents',
+      channel,
+      message,
+      status: scheduled_at ? 'scheduled' : 'draft',
+      scheduled_at: scheduled_at || undefined,
+      audience_size: audienceSize,
+      sent_count: 0,
+      failed_count: 0,
+      created_at: now,
+      updated_at: now,
+    };
+    if (!db.data.broadcasts) db.data.broadcasts = [];
+    db.data.broadcasts.push(broadcast);
+    save();
+    res.json(broadcast);
+  });
+
+  // GET /api/broadcasts/:id - get single broadcast
+  app.get('/api/broadcasts/:id', auth, (req: any, res) => {
+    const broadcast = (db.data.broadcasts || []).find((b: Broadcast) => b.id === req.params.id && b.user_id === req.userId);
+    if (!broadcast) return res.status(404).json({ error: 'Broadcast not found' });
+    res.json(broadcast);
+  });
+
+  // DELETE /api/broadcasts/:id - delete broadcast
+  app.delete('/api/broadcasts/:id', auth, (req: any, res) => {
+    const idx = (db.data.broadcasts || []).findIndex((b: Broadcast) => b.id === req.params.id && b.user_id === req.userId);
+    if (idx === -1) return res.status(404).json({ error: 'Broadcast not found' });
+    db.data.broadcasts.splice(idx, 1);
+    save();
+    res.json({ success: true });
+  });
+
+  // POST /api/broadcasts/:id/send - mark broadcast as sent (simulate send)
+  app.post('/api/broadcasts/:id/send', auth, async (req: any, res) => {
+    const broadcast = (db.data.broadcasts || []).find((b: Broadcast) => b.id === req.params.id && b.user_id === req.userId);
+    if (!broadcast) return res.status(404).json({ error: 'Broadcast not found' });
+    if (broadcast.status === 'sent') return res.status(400).json({ error: 'Already sent' });
+    broadcast.status = 'sending';
+    broadcast.updated_at = new Date().toISOString();
+    save();
+    // Simulate async send
+    setTimeout(() => {
+      broadcast.status = 'sent';
+      broadcast.sent_at = new Date().toISOString();
+      broadcast.sent_count = broadcast.audience_size;
+      broadcast.failed_count = 0;
+      broadcast.updated_at = new Date().toISOString();
+      save();
+    }, 1500);
+    res.json({ success: true, message: 'Broadcast queued for delivery' });
+  });
+
+  // GET /api/insights - agent performance insights for dashboard
+  app.get('/api/insights', auth, (req: any, res) => {
+    const agents = db.data.agents.filter((a: Agent) => a.user_id === req.userId);
+    const leads = (db.data.leads || []).filter((l: Lead) => l.user_id === req.userId);
+    const broadcasts = (db.data.broadcasts || []).filter((b: Broadcast) => b.user_id === req.userId);
+    const now = Date.now();
+    const insights: Array<{ id: string; type: 'warning' | 'tip' | 'success' | 'opportunity'; title: string; description: string; action?: string; actionPath?: string }> = [];
+
+    // Check for inactive agents
+    const inactiveAgents = agents.filter((a: Agent) => {
+      if (!a.is_active) return false;
+      const metrics = (db.data.agent_metrics || []).filter((m: AgentMetrics) => m.agent_id === a.id);
+      if (metrics.length === 0) return false;
+      const latest = metrics[metrics.length - 1];
+      return latest.messages_sent === 0 && metrics.length > 2;
+    });
+    if (inactiveAgents.length > 0) {
+      insights.push({ id: 'inactive-agents', type: 'warning', title: 'Agent may be offline', description: `${inactiveAgents[0].name} has had no messages recently. Check API keys and integrations.`, action: 'Check Agent', actionPath: `/dashboard/agents/${inactiveAgents[0].id}` });
+    }
+
+    // New leads opportunity
+    const newLeads = leads.filter((l: Lead) => l.stage === 'new');
+    if (newLeads.length > 0) {
+      insights.push({ id: 'unread-leads', type: 'opportunity', title: `${newLeads.length} new leads need attention`, description: 'Move your new leads through the pipeline to increase conversions.', action: 'View Leads', actionPath: '/dashboard/leads' });
+    }
+
+    // Broadcasts opportunity
+    if (agents.length > 0 && broadcasts.length === 0) {
+      insights.push({ id: 'no-broadcasts', type: 'tip', title: 'Engage your audience with a broadcast', description: "You haven't sent any broadcasts yet. Reach all your contacts at once.", action: 'Create Broadcast', actionPath: '/dashboard/broadcasts' });
+    }
+
+    // Knowledge base tip
+    const agentsWithoutKB = agents.filter((a: Agent) => !a.knowledge_base || a.knowledge_base.trim() === '');
+    const agentsWithoutKBSources = agents.filter((a: Agent) => {
+      const sources = (db.data.knowledge_sources || []).filter((k: KnowledgeSource) => k.agent_id === a.id);
+      return sources.length === 0;
+    });
+    if (agentsWithoutKBSources.length > 0 && agents.length > 0) {
+      insights.push({ id: 'no-knowledge-base', type: 'tip', title: 'Improve agent accuracy with a knowledge base', description: `${agentsWithoutKBSources.length} agent(s) don't have a knowledge base. Adding one reduces hallucinations.`, action: 'Add Knowledge', actionPath: `/dashboard/agents/${agentsWithoutKBSources[0].id}?tab=knowledge` });
+    }
+
+    // Success: milestone messages
+    const totalMessages = agents.reduce((sum: number, a: Agent) => sum + (a.total_messages || 0), 0);
+    if (totalMessages >= 100) {
+      insights.push({ id: 'message-milestone', type: 'success', title: `🎉 ${totalMessages.toLocaleString()} total messages sent!`, description: 'Your agents are getting traction. Keep building!', action: 'View Analytics', actionPath: '/dashboard/analytics' });
+    }
+
+    // Welcome message for new users
+    if (agents.length === 0) {
+      insights.push({ id: 'get-started', type: 'tip', title: 'Create your first agent', description: 'Deploy an AI agent on Telegram, SMS, or Discord in under 2 minutes.', action: 'Create Agent', actionPath: '/dashboard/agents/new' });
+    }
+
+    res.json(insights.slice(0, 5));
   });
 
   // ─── Frontend ─────────────────────────────────────────────────────────────

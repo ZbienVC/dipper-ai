@@ -1,6 +1,6 @@
 import DashboardLayout from '../components/DashboardLayout'
 import { useState, useEffect } from 'react'
-import { Check, Zap, ExternalLink, Loader2 } from 'lucide-react'
+import { Check, Zap, ExternalLink, Loader2, AlertTriangle } from 'lucide-react'
 
 function getStoredUser() {
   try {
@@ -13,35 +13,67 @@ function getStoredUser() {
 const PLAN_DEFS = [
   {
     key: 'free',
-    name: 'Free',
+    name: 'Starter',
     price: '$0',
     period: '/mo',
-    features: ['1 AI Agent', '20 messages/day', 'Claude Haiku model', 'SMS & Telegram', 'Community support'],
+    features: [
+      '1 AI Agent',
+      '500 messages/month',
+      '2 integrations',
+      'Claude Haiku only',
+      'Community support',
+    ],
     cta: 'Current Plan',
   },
   {
     key: 'pro',
     name: 'Pro',
-    price: '$49',
+    price: '$29',
     period: '/mo',
     popular: true,
-    features: ['5 AI Agents', '500 messages/day', 'Claude Haiku + Sonnet + GPT-4o Mini', 'All channels', 'Priority support', 'Analytics dashboard'],
+    features: [
+      '5 AI Agents',
+      '5,000 messages/month',
+      'All integrations',
+      'All AI models',
+      'Long-term memory',
+      'Always-on agents',
+      'Email support',
+    ],
     cta: 'Upgrade to Pro',
   },
   {
     key: 'business',
     name: 'Business',
-    price: '$149',
+    price: '$79',
     period: '/mo',
-    features: ['25 AI Agents', '5,000 messages/day', 'All models incl. GPT-4o, Claude Opus, Gemini', 'All channels', 'Dedicated support', 'Advanced analytics', 'API access'],
+    features: [
+      'Unlimited agents',
+      '25,000 messages/month',
+      'All integrations & models',
+      'Custom branding',
+      'Team members (up to 5)',
+      'API access',
+      'Priority support',
+    ],
     cta: 'Upgrade to Business',
   },
 ]
 
+type UsageData = {
+  plan: string
+  currentMonth: string
+  planPrice?: number
+  usage: {
+    messages: { used: number; limit: number }
+    agents: { used: number; limit: number }
+    integrations: { used: number; limit: number }
+  }
+}
+
 export default function Billing() {
   const storedUser = getStoredUser()
-  const [profile, setProfile] = useState<{ plan?: string; agentCount?: number; limits?: { agents: number; messagesPerDay: number } } | null>(null)
-  const [usage, setUsage] = useState<{ messagesUsedToday: number; messagesLimitToday: number; agentsUsed: number; agentsLimit: number } | null>(null)
+  const [billingUsage, setBillingUsage] = useState<UsageData | null>(null)
   const [loading, setLoading] = useState(true)
   const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null)
   const [portalLoading, setPortalLoading] = useState(false)
@@ -58,16 +90,14 @@ export default function Billing() {
 
   useEffect(() => {
     if (!token) { setLoading(false); return }
-    Promise.all([
-      fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null),
-      fetch('/api/usage', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null),
-    ]).then(([meData, usageData]) => {
-      if (meData) setProfile(meData)
-      if (usageData) setUsage(usageData)
-    }).catch(() => {}).finally(() => setLoading(false))
+    fetch('/api/billing/usage', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setBillingUsage(data) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
   }, [token])
 
-  const currentPlan = profile?.plan || storedUser.plan || 'free'
+  const currentPlan = billingUsage?.plan || storedUser.plan || 'free'
   const isOnPaidPlan = currentPlan !== 'free'
 
   async function handleUpgrade(planKey: string) {
@@ -117,6 +147,28 @@ export default function Billing() {
 
   const PLANS = PLAN_DEFS.map(p => ({ ...p, current: p.key === currentPlan }))
 
+  // Usage meters from billing/usage endpoint
+  const usageMeters = billingUsage ? [
+    {
+      label: 'Messages',
+      used: billingUsage.usage.messages.used,
+      limit: billingUsage.usage.messages.limit,
+      color: 'bg-violet-500',
+    },
+    {
+      label: 'Agents',
+      used: billingUsage.usage.agents.used,
+      limit: billingUsage.usage.agents.limit,
+      color: 'bg-blue-500',
+    },
+    {
+      label: 'Integrations',
+      used: billingUsage.usage.integrations.used,
+      limit: billingUsage.usage.integrations.limit === 999 ? 999 : billingUsage.usage.integrations.limit,
+      color: 'bg-emerald-500',
+    },
+  ] : []
+
   return (
     <DashboardLayout title="Billing">
       <div className="mb-5">
@@ -136,7 +188,7 @@ export default function Billing() {
         </div>
       )}
 
-      {/* Current Plan Card */}
+      {/* Current Plan + Usage */}
       <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 mb-6">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
           <div className="flex items-center gap-3">
@@ -144,8 +196,10 @@ export default function Billing() {
               <Zap size={18} className="text-violet-400" />
             </div>
             <div>
-              <p className="font-bold text-white capitalize">{currentPlan} Plan</p>
-              <p className="text-xs text-slate-500">Current plan</p>
+              <p className="font-bold text-white capitalize">{currentPlan === 'free' ? 'Starter' : currentPlan} Plan</p>
+              <p className="text-xs text-slate-500">
+                {billingUsage?.currentMonth ? `Usage for ${billingUsage.currentMonth}` : 'Current plan'}
+              </p>
             </div>
           </div>
           {isOnPaidPlan && (
@@ -160,33 +214,67 @@ export default function Billing() {
           )}
         </div>
 
-        {/* Usage bars */}
+        {/* Usage meters */}
         {loading ? (
           <div className="flex items-center gap-2 text-slate-500 text-sm">
             <Loader2 size={14} className="animate-spin" /> Loading usage...
           </div>
-        ) : usage ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {[
-              { label: 'Messages Today', used: usage.messagesUsedToday, limit: usage.messagesLimitToday, color: 'bg-violet-500' },
-              { label: 'Agents', used: usage.agentsUsed, limit: usage.agentsLimit, color: 'bg-blue-500' },
-            ].map(u => {
-              const pct = Math.round((u.used / u.limit) * 100)
+        ) : usageMeters.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {usageMeters.map(u => {
+              const isUnlimited = u.limit === 999
+              const pct = isUnlimited ? 0 : Math.round((u.used / u.limit) * 100)
               return (
                 <div key={u.label}>
                   <div className="flex justify-between text-sm mb-1.5">
                     <span className="font-semibold text-slate-300">{u.label}</span>
-                    <span className={`font-bold ${pct >= 100 ? 'text-red-400' : pct >= 80 ? 'text-amber-400' : 'text-white'}`}>{u.used}/{u.limit}</span>
+                    <span className={`font-bold ${pct >= 100 ? 'text-red-400' : pct >= 80 ? 'text-amber-400' : 'text-white'}`}>
+                      {u.used}{isUnlimited ? '' : `/${u.limit}`}
+                      {isUnlimited && <span className="text-slate-500 text-xs ml-1">unlimited</span>}
+                    </span>
                   </div>
-                  <div className="w-full bg-white/5 rounded-full h-1.5">
-                    <div className={`${pct >= 100 ? 'bg-red-500' : u.color} h-1.5 rounded-full transition-all`} style={{ width: `${Math.min(pct, 100)}%` }} />
-                  </div>
-                  {pct >= 100 && <p className="text-xs text-red-400 mt-1">Limit reached — upgrade to continue</p>}
+                  {!isUnlimited && (
+                    <div className="w-full bg-white/5 rounded-full h-1.5">
+                      <div
+                        className={`${pct >= 100 ? 'bg-red-500' : u.color} h-1.5 rounded-full transition-all`}
+                        style={{ width: `${Math.min(pct, 100)}%` }}
+                      />
+                    </div>
+                  )}
+                  {pct >= 80 && pct < 100 && (
+                    <p className="text-xs text-amber-400 mt-1 flex items-center gap-1">
+                      <AlertTriangle size={10} /> {pct}% used — consider upgrading
+                    </p>
+                  )}
+                  {pct >= 100 && (
+                    <p className="text-xs text-red-400 mt-1">Limit reached — upgrade to continue</p>
+                  )}
                 </div>
               )
             })}
           </div>
         ) : null}
+
+        {/* Upgrade CTA if on free and near limits */}
+        {!isOnPaidPlan && billingUsage && billingUsage.usage.messages.limit > 0 && (
+          (() => {
+            const msgPct = Math.round((billingUsage.usage.messages.used / billingUsage.usage.messages.limit) * 100)
+            if (msgPct >= 80) return (
+              <div className="mt-4 bg-violet-500/10 border border-violet-500/20 rounded-xl p-3 flex items-center justify-between gap-3">
+                <p className="text-sm text-violet-300">You've used <strong>{msgPct}%</strong> of your monthly messages. Upgrade to Pro for 10× more.</p>
+                <button
+                  onClick={() => handleUpgrade('pro')}
+                  disabled={upgradeLoading === 'pro'}
+                  className="gradient-btn px-4 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap flex items-center gap-1.5"
+                >
+                  {upgradeLoading === 'pro' ? <Loader2 size={12} className="animate-spin" /> : null}
+                  Upgrade to Pro
+                </button>
+              </div>
+            )
+            return null
+          })()
+        )}
       </div>
 
       {/* Plan Cards */}

@@ -2,6 +2,7 @@
 import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import { Plus, Search, MessageSquare, Circle, Edit3, Bot, Headphones, TrendingUp, User, Sparkles, ArrowRight, LayoutGrid, List, Trash2, Pause, Play, Zap } from 'lucide-react'
+import UpgradeModal from '../components/UpgradeModal'
 
 interface Agent {
   id: string

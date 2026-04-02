@@ -25,6 +25,7 @@ const Teams = lazy(() => import('./pages/Teams'))
 const TeamDetail = lazy(() => import('./pages/TeamDetail'))
 const Leads = lazy(() => import('./pages/Leads'))
 const Playground = lazy(() => import('./pages/Playground'))
+const Broadcasts = lazy(() => import('./pages/Broadcasts'))
 
 function PageLoader() {
   return (
@@ -72,6 +73,7 @@ function App() {
           <Route path="/dashboard/teams/:id" element={<PrivateRoute><TeamDetail /></PrivateRoute>} />
           <Route path="/dashboard/leads" element={<PrivateRoute><Leads /></PrivateRoute>} />
           <Route path="/dashboard/playground" element={<PrivateRoute><Playground /></PrivateRoute>} />
+          <Route path="/dashboard/broadcasts" element={<PrivateRoute><Broadcasts /></PrivateRoute>} />
 
           <Route path="/admin" element={<Admin />} />
 
