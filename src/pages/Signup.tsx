@@ -28,7 +28,7 @@ export default function Signup() {
       const data = await res.json()
       if (res.ok && data.token) {
         localStorage.setItem('dipperai_user', JSON.stringify({ ...data.user, name, token: data.token }))
-        navigate('/dashboard')
+        navigate('/onboarding')
       } else {
         setError(data.error || 'Could not create account. Please try again.')
       }

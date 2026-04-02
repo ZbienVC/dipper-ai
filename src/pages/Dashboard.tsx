@@ -1,7 +1,7 @@
 ﻿import { Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
-import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3, ArrowRight, Send, Clock, Users2, Users, AlertTriangle, Lightbulb, CheckCircle2, Sparkles, Radio } from 'lucide-react'
+import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3, ArrowRight, Send, Clock, Users2, Users, AlertTriangle, Lightbulb, CheckCircle2, Sparkles, Radio, FileText, TrendingUp, Heart } from 'lucide-react'
 
 function getToken() {
   try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
@@ -35,6 +35,7 @@ export default function Dashboard() {
   const [teams, setTeams] = useState<any[]>([])
   const [leadStats, setLeadStats] = useState<{ total: number; byStage: Record<string, number>; totalValue: number } | null>(null)
   const [insights, setInsights] = useState<any[]>([])
+  const [agentHealth, setAgentHealth] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -49,7 +50,8 @@ export default function Dashboard() {
       fetch('/api/teams', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : []).catch(() => []),
       fetch('/api/leads/stats', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null).catch(() => null),
       fetch('/api/insights', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : []).catch(() => []),
-    ]).then(([agentData, analyticsData, integrationData, usageData, activityData, teamsData, leadsStatsData, insightsData]) => {
+      fetch('/api/agents/health', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : []).catch(() => []),
+    ]).then(([agentData, analyticsData, integrationData, usageData, activityData, teamsData, leadsStatsData, insightsData, healthData]) => {
       if (Array.isArray(agentData)) setAgents(agentData)
       if (analyticsData) setAnalytics(analyticsData)
       if (Array.isArray(integrationData)) setIntegrationCount(integrationData.filter((i: any) => i.connected).length)
@@ -58,6 +60,7 @@ export default function Dashboard() {
       if (Array.isArray(teamsData)) setTeams(teamsData)
       if (leadsStatsData) setLeadStats(leadsStatsData)
       if (Array.isArray(insightsData)) setInsights(insightsData)
+      if (Array.isArray(healthData)) setAgentHealth(healthData)
     }).finally(() => setLoading(false))
   }, [])
 
@@ -281,6 +284,53 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Portfolio View — shown when user manages multiple client teams */}
+      {teams.length > 1 && (
+        <div className="mt-5 bg-gradient-to-br from-violet-600/10 via-violet-500/5 to-transparent border border-violet-500/20 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={15} className="text-violet-400" />
+              <h2 className="text-sm font-semibold text-white">Agency Portfolio</h2>
+              <span className="text-xs bg-violet-500/20 text-violet-400 border border-violet-500/30 px-2 py-0.5 rounded-full font-semibold">{teams.length} Clients</span>
+            </div>
+            <Link to="/dashboard/reports" className="text-xs text-violet-400 hover:text-violet-300 font-medium flex items-center gap-1 transition-colors">
+              <FileText size={11} /> View Reports
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <div className="bg-white/5 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-white">{agents.length}</div>
+              <div className="text-xs text-slate-500 mt-0.5">Total Agents</div>
+            </div>
+            <div className="bg-white/5 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-white">{totalMessages.toLocaleString()}</div>
+              <div className="text-xs text-slate-500 mt-0.5">All-Time Messages</div>
+            </div>
+            <div className="bg-white/5 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-emerald-400">{activeAgents.length}</div>
+              <div className="text-xs text-slate-500 mt-0.5">Active Agents</div>
+            </div>
+            <div className="bg-white/5 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-amber-400">{teams.length}</div>
+              <div className="text-xs text-slate-500 mt-0.5">Client Workspaces</div>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {teams.slice(0, 4).map((team: any) => (
+              <Link key={team.id} to={`/dashboard/teams/${team.id}`}
+                className="flex items-center gap-3 bg-white/5 hover:bg-white/8 rounded-xl px-3 py-2.5 transition-all group">
+                <div className="w-7 h-7 rounded-lg bg-violet-500/20 border border-violet-500/20 flex items-center justify-center flex-shrink-0">
+                  <Users2 size={12} className="text-violet-400" />
+                </div>
+                <span className="flex-1 text-sm font-semibold text-slate-300 group-hover:text-white truncate transition-colors">{team.name}</span>
+                <span className="text-xs text-slate-600">{(team.members || []).length} agents</span>
+                <ArrowRight size={12} className="text-slate-600 group-hover:text-violet-400 transition-colors" />
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Active Teams Widget */}
       <div className="mt-5 bg-[#111118] rounded-xl p-5 border border-[#1e1e2e]">
         <div className="flex items-center justify-between mb-4">
@@ -403,6 +453,43 @@ export default function Dashboard() {
                 +{activeAgents.length - 4} more active agents →
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Agent Health Monitoring */}
+      {!loading && agentHealth.length > 0 && (
+        <div className="mt-5 bg-[#111118] rounded-xl p-5 border border-[#1e1e2e]">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Heart size={15} className="text-violet-400" />
+              <h2 className="text-sm font-semibold text-white">Agent Health</h2>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {agentHealth.map((h: any) => (
+              <div key={h.id}
+                className="flex items-center gap-3 p-3 rounded-xl bg-white/3 border border-[#1e1e2e] hover:border-violet-500/20 transition-all cursor-pointer"
+                onClick={() => navigate(`/dashboard/agents/${h.id}`)}>
+                <span className="text-lg flex-shrink-0">{h.emoji || '🤖'}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-white truncate">{h.name}</p>
+                  <p className="text-xs text-slate-500">
+                    {h.channels.count} channel{h.channels.count !== 1 ? 's' : ''} · {(h.total_messages || 0).toLocaleString()} messages
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                    h.heartbeat === 'green' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                    h.heartbeat === 'yellow' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                    'bg-red-500/10 text-red-400 border-red-500/20'
+                  }`}>
+                    <Circle size={5} className={`${h.heartbeat === 'green' ? 'fill-green-400' : h.heartbeat === 'yellow' ? 'fill-yellow-400' : 'fill-red-400'}`} />
+                    {h.heartbeat === 'green' ? 'Healthy' : h.heartbeat === 'yellow' ? 'Idle' : 'Inactive'}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

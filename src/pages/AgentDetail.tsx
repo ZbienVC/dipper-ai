@@ -126,6 +126,17 @@ export default function AgentDetail() {
   const [kbSearchResults, setKbSearchResults] = useState<any[]>([])
   const [kbSearching, setKbSearching] = useState(false)
 
+  // New capabilities state
+  const [capToolsEnabled, setCapToolsEnabled] = useState<string[]>([])
+  const [capAutoTranslate, setCapAutoTranslate] = useState(false)
+  const [capFollowupEnabled, setCapFollowupEnabled] = useState(false)
+  const [capFollowupDelayHours, setCapFollowupDelayHours] = useState(24)
+  const [capFollowupMessage, setCapFollowupMessage] = useState('')
+  const [capEscalateOnNeg, setCapEscalateOnNeg] = useState(false)
+  const [capEscalationNotify, setCapEscalationNotify] = useState('inapp')
+  const [capSaving, setCapSaving] = useState(false)
+  const [capSaved, setCapSaved] = useState(false)
+
   useEffect(() => {
     const token = getToken()
     if (!token) return
@@ -156,6 +167,14 @@ export default function AgentDetail() {
       setAlwaysOn(!!agent.always_on)
       setSettingsName(agent.name || '')
       setSettingsDesc(agent.description || '')
+      // New capabilities
+      setCapToolsEnabled(agent.tools_enabled || [])
+      setCapAutoTranslate(!!agent.auto_translate)
+      setCapFollowupEnabled(!!agent.followup_enabled)
+      setCapFollowupDelayHours(agent.followup_delay_hours || 24)
+      setCapFollowupMessage(agent.followup_message || '')
+      setCapEscalateOnNeg(!!agent.escalate_on_negative)
+      setCapEscalationNotify(agent.escalation_notify || 'inapp')
     }
   }, [agent?.id])
 
@@ -252,6 +271,34 @@ export default function AgentDetail() {
       }
     } catch {}
     setSettingsSaving(false)
+  }
+
+  const handleSaveCapabilities = async () => {
+    const token = getToken()
+    if (!token || !agent) return
+    setCapSaving(true)
+    try {
+      const res = await fetch(`/api/agents/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          tools_enabled: capToolsEnabled,
+          auto_translate: capAutoTranslate,
+          followup_enabled: capFollowupEnabled,
+          followup_delay_hours: capFollowupDelayHours,
+          followup_message: capFollowupMessage,
+          escalate_on_negative: capEscalateOnNeg,
+          escalation_notify: capEscalationNotify,
+        }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setAgent(updated)
+        setCapSaved(true)
+        setTimeout(() => setCapSaved(false), 2000)
+      }
+    } catch {}
+    setCapSaving(false)
   }
 
   const handleDeleteAgent = async () => {
@@ -1388,7 +1435,18 @@ export default function AgentDetail() {
     )
   }
 
-  const renderSettings = () => (
+  const renderSettings = () => {
+    const BUILT_IN_TOOLS = [
+      { name: 'get_current_time', label: 'Current Time', desc: 'Agent knows the current date/time and can share it.' },
+      { name: 'calculate', label: 'Calculator', desc: 'Agent can perform math calculations on request.' },
+      { name: 'search_knowledge_base', label: 'Knowledge Search', desc: 'Agent explicitly searches its knowledge base mid-conversation.' },
+      { name: 'create_lead', label: 'Lead Capture', desc: 'Agent saves user contact info (name/email/phone) to your CRM automatically.' },
+      { name: 'send_notification', label: 'Owner Notifications', desc: 'Agent flags important messages to you via the Activity feed.' },
+    ]
+    const toggleTool = (name: string) => {
+      setCapToolsEnabled(prev => prev.includes(name) ? prev.filter(t => t !== name) : [...prev, name])
+    }
+    return (
     <div className="space-y-5">
       {/* Always-On */}
       <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
@@ -1432,6 +1490,112 @@ export default function AgentDetail() {
         </button>
       </div>
 
+      {/* ── New Capabilities ─────────────────────────────────────────── */}
+
+      {/* Tools */}
+      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 space-y-4">
+        <h3 className="font-semibold text-white text-sm flex items-center gap-2">
+          <Settings size={14} className="text-violet-400" /> Agent Tools
+        </h3>
+        <p className="text-xs text-slate-500">Enable built-in tools your agent can use during conversations.</p>
+        <div className="space-y-3">
+          {BUILT_IN_TOOLS.map(tool => (
+            <div key={tool.name} className="flex items-start gap-3">
+              <button onClick={() => toggleTool(tool.name)}
+                className={`mt-0.5 flex-shrink-0 w-10 h-5 rounded-full transition-colors ${capToolsEnabled.includes(tool.name) ? 'bg-violet-500' : 'bg-white/10'} relative`}>
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${capToolsEnabled.includes(tool.name) ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </button>
+              <div>
+                <span className="text-sm text-white font-medium">{tool.label}</span>
+                <p className="text-xs text-slate-500 mt-0.5">{tool.desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Language */}
+      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-white text-sm flex items-center gap-2">
+              <Globe size={14} className="text-violet-400" /> Auto-Translate
+            </h3>
+            <p className="text-xs text-slate-500 mt-1">Agent detects user language and responds in the same language automatically.</p>
+          </div>
+          <button onClick={() => setCapAutoTranslate(v => !v)} className="ml-4 flex-shrink-0">
+            {capAutoTranslate ? <ToggleRight size={28} className="text-violet-400" /> : <ToggleLeft size={28} className="text-slate-500" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Proactive Follow-up */}
+      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-white text-sm flex items-center gap-2">
+              <MessageSquare size={14} className="text-violet-400" /> Proactive Follow-up
+            </h3>
+            <p className="text-xs text-slate-500 mt-1">Automatically follow up with users who haven't responded.</p>
+          </div>
+          <button onClick={() => setCapFollowupEnabled(v => !v)} className="ml-4 flex-shrink-0">
+            {capFollowupEnabled ? <ToggleRight size={28} className="text-violet-400" /> : <ToggleLeft size={28} className="text-slate-500" />}
+          </button>
+        </div>
+        {capFollowupEnabled && (
+          <div className="space-y-3 pt-1">
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">Follow-up after</label>
+              <select value={capFollowupDelayHours} onChange={e => setCapFollowupDelayHours(Number(e.target.value))}
+                className={inputClass + ' cursor-pointer'}>
+                <option value={1}>1 hour</option>
+                <option value={6}>6 hours</option>
+                <option value={24}>24 hours</option>
+                <option value={48}>48 hours</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">Follow-up message</label>
+              <textarea value={capFollowupMessage} onChange={e => setCapFollowupMessage(e.target.value)} rows={2}
+                className={inputClass} placeholder="Hey! Just checking in — is there anything else I can help you with?" />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Escalation */}
+      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-white text-sm flex items-center gap-2">
+              <AlertCircle size={14} className="text-amber-400" /> Escalation on Negative Sentiment
+            </h3>
+            <p className="text-xs text-slate-500 mt-1">Flag angry, frustrated, or urgent messages in the Activity feed for your review.</p>
+          </div>
+          <button onClick={() => setCapEscalateOnNeg(v => !v)} className="ml-4 flex-shrink-0">
+            {capEscalateOnNeg ? <ToggleRight size={28} className="text-amber-400" /> : <ToggleLeft size={28} className="text-slate-500" />}
+          </button>
+        </div>
+        {capEscalateOnNeg && (
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Notify via</label>
+            <select value={capEscalationNotify} onChange={e => setCapEscalationNotify(e.target.value)}
+              className={inputClass + ' cursor-pointer'}>
+              <option value="inapp">In-app only (Activity feed)</option>
+              <option value="telegram">Telegram + In-app</option>
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* Save capabilities */}
+      <div className="flex justify-end">
+        <button onClick={handleSaveCapabilities} disabled={capSaving}
+          className={`flex items-center gap-2 px-5 py-2 rounded-xl font-semibold text-sm transition-all ${capSaved ? 'bg-green-500 text-white' : 'gradient-btn'}`}>
+          {capSaving ? <Loader2 size={14} className="animate-spin" /> : capSaved ? <><Check size={14} /> Saved!</> : <><Save size={14} /> Save Capabilities</>}
+        </button>
+      </div>
+
       {/* Danger zone */}
       <div className="bg-[#111118] border border-red-500/20 rounded-xl p-5">
         <h3 className="font-semibold text-red-400 text-sm mb-1 flex items-center gap-2"><AlertCircle size={14} /> Danger Zone</h3>
@@ -1450,7 +1614,8 @@ export default function AgentDetail() {
         )}
       </div>
     </div>
-  )
+    )
+  }
 
   const renderEmptyTab = (tab: string) => (
     <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-16 text-center">

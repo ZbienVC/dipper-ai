@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import {
   MessageSquare, Send, Terminal, Plug, Bot, AlertCircle, Zap, Clock,
-  Activity, CheckCircle, ChevronDown, ChevronRight, RefreshCw, Trash2
+  Activity, CheckCircle, ChevronDown, ChevronRight, RefreshCw, Trash2, Download
 } from 'lucide-react'
 
 function getToken() {
@@ -322,6 +322,14 @@ export default function ActivityPage() {
             <RefreshCw size={13} />
             Refresh
           </button>
+          <div className="ml-auto flex items-center gap-2">
+          <a
+            href={`/api/activity/export?format=csv`}
+            onClick={e => { const t = getToken(); if (!t) return; e.preventDefault(); const url = '/api/activity/export?format=csv'; fetch(url, { headers: { Authorization: `Bearer ${t}` } }).then(r => r.blob()).then(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'activity.csv'; a.click() }) }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-[#1e1e2e] text-slate-400 hover:bg-white/5 hover:text-white transition-all"
+          >
+            <Download size={13} /> Export CSV
+          </a>
           {!confirmClear ? (
             <button
               onClick={() => setConfirmClear(true)}
@@ -341,7 +349,6 @@ export default function ActivityPage() {
       </div>
 
       {/* Activity Feed */}
-      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e1e2e]">
           <div className="flex items-center gap-2">
             <Activity size={14} className="text-slate-500" />

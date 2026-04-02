@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import {
   Users, Search, Plus, X, ChevronDown, MessageSquare, Clock,
   DollarSign, Tag, Mail, Phone, Trash2, Edit3, Check, BarChart2,
-  List, Columns, ArrowUpDown, AlertCircle, Hash
+  List, Columns, ArrowUpDown, AlertCircle, Hash, Download
 } from 'lucide-react'
 
 function getToken() {
@@ -888,13 +888,22 @@ export default function Leads() {
               {stats ? `${stats.total} leads across all agents` : 'Loading...'}
             </p>
           </div>
-          <button
-            onClick={() => navigate('/dashboard/agents')}
-            className="gradient-btn flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
-          >
-            <Plus size={14} />
-            New Agent
-          </button>
+          <div className="flex items-center gap-2">
+            <a
+              href="/api/leads/export?format=csv"
+              onClick={e => { const t = getToken(); if (!t) return; e.preventDefault(); fetch('/api/leads/export?format=csv', { headers: { Authorization: `Bearer ${t}` } }).then(r => r.blob()).then(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'leads.csv'; a.click() }) }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-[#1e1e2e] text-slate-400 hover:bg-white/5 hover:text-white transition-all"
+            >
+              <Download size={14} /> Export CSV
+            </a>
+            <button
+              onClick={() => navigate('/dashboard/agents')}
+              className="gradient-btn flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
+            >
+              <Plus size={14} />
+              New Agent
+            </button>
+          </div>
         </div>
 
         {/* View tabs + search */}

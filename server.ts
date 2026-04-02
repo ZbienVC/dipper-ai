@@ -37,9 +37,23 @@ type Agent = {
   response_format?: string;
   max_response_length?: number;
   long_term_memory?: number;
+  // New capability fields
+  tools_enabled?: string[]; // list of enabled tool names
+  auto_translate?: boolean; // auto-respond in user's language
+  // Proactive messages
+  followup_enabled?: boolean;
+  followup_delay_hours?: number;
+  followup_message?: string;
+  daily_digest_enabled?: boolean;
+  daily_digest_time?: string; // "09:00"
+  // Escalation / sentiment
+  escalate_on_negative?: boolean;
+  escalation_notify?: 'inapp' | 'telegram' | 'email';
+  escalation_message?: string;
 };
 type Message = { id: string; conversation_id: string; role: string; content: string; model_used?: string; created_at: string; };
-type Conversation = { id: string; agent_id: string; user_id?: string; channel: string; message_count: number; created_at: string; };
+type Conversation = { id: string; agent_id: string; user_id?: string; channel: string; message_count: number; created_at: string; summary?: string; summary_at?: string; sentiment_flag?: 'negative' | 'urgent' | null; last_message_at?: string; followup_sent?: boolean; };
+type EscalationAlert = { id: string; user_id: string; agent_id: string; agent_name: string; conversation_id: string; channel: string; user_identifier: string; sentiment: string; message_snippet: string; created_at: string; resolved: boolean; };
 type Integration = {
   id: string; user_id: string; type: string;
   credentials: Record<string, string>;
@@ -272,6 +286,7 @@ type DBSchema = {
   broadcasts: Broadcast[];
   approvals: Approval[];
   api_keys: ApiKey[];
+  escalation_alerts: EscalationAlert[];
 };
 
 // ─── Plan Definitions ─────────────────────────────────────────────────────────
@@ -411,6 +426,21 @@ function buildAgentSystemPrompt(agent: Agent, contextPrompt?: string): string {
 
   if (agent.max_response_length && agent.max_response_length > 0) {
     parts.push(`Keep responses under ${agent.max_response_length} words.`);
+  }
+
+  // Auto-translate
+  if (agent.auto_translate) {
+    parts.push(`IMPORTANT: Detect the user's language from their first message and respond in the SAME language. If they write in Spanish, respond in Spanish. If French, respond in French. Default to English if unclear.`);
+  }
+
+  // Tool hints
+  if (agent.tools_enabled && agent.tools_enabled.length > 0) {
+    const toolDescs: string[] = [];
+    if (agent.tools_enabled.includes('get_current_time')) toolDescs.push('- get_current_time: You know the current date/time: ' + new Date().toLocaleString());
+    if (agent.tools_enabled.includes('calculate')) toolDescs.push('- calculate: You can perform mathematical calculations when asked.');
+    if (agent.tools_enabled.includes('create_lead')) toolDescs.push('- create_lead: When a user shares contact info (name/email/phone), confirm you\'ve saved them as a lead.');
+    if (agent.tools_enabled.includes('send_notification')) toolDescs.push('- send_notification: You can flag urgent matters to the agent owner.');
+    if (toolDescs.length > 0) parts.push(`You have the following capabilities:\n${toolDescs.join('\n')}`);
   }
 
   return parts.join('\n\n');
@@ -812,6 +842,159 @@ function analyzeSentiment(text: string): 'positive' | 'negative' | 'neutral' {
   return 'neutral';
 }
 
+// Enhanced sentiment detection for escalation
+function detectSentimentEnhanced(message: string): 'positive' | 'neutral' | 'negative' | 'urgent' {
+  const negativeWords = ['angry', 'terrible', 'awful', 'cancel', 'refund', 'frustrated', 'horrible', 'worst', 'useless', 'scam', 'fraud', 'broken', 'pathetic', 'ridiculous'];
+  const urgentWords = ['urgent', 'emergency', 'immediately', 'asap', 'now', 'critical', 'help me now', 'need help now'];
+  const positiveWords = ['thanks', 'great', 'perfect', 'awesome', 'love', 'excellent', 'amazing', 'wonderful'];
+  const lc = message.toLowerCase();
+  if (urgentWords.some(w => lc.includes(w))) return 'urgent';
+  if (negativeWords.some(w => lc.includes(w))) return 'negative';
+  if (positiveWords.some(w => lc.includes(w))) return 'positive';
+  return 'neutral';
+}
+
+// Language detection (simple heuristic)
+function detectLanguage(text: string): string {
+  const nonAscii = (text.match(/[^\x00-\x7F]/g) || []).length;
+  const ratio = nonAscii / (text.length || 1);
+  if (ratio > 0.2) return 'non-english';
+  return 'english';
+}
+
+// Response quality scoring
+function scoreResponseQuality(response: string, userMessage: string, channel: string): { score: number; flags: string[] } {
+  const flags: string[] = [];
+  let score = 100;
+  // Channel-specific length checks
+  if (channel === 'sms' && response.length > 500) { flags.push('too_long_for_sms'); score -= 20; }
+  if (response.length > 2000) { flags.push('very_long'); score -= 10; }
+  if (response.trim().length < 10) { flags.push('too_short'); score -= 30; }
+  // Basic relevance: do any words from user message appear in response?
+  const userWords = userMessage.toLowerCase().split(/\s+/).filter(w => w.length > 4);
+  const responseLC = response.toLowerCase();
+  const relevantWords = userWords.filter(w => responseLC.includes(w));
+  if (userWords.length > 0 && relevantWords.length / userWords.length < 0.15) {
+    flags.push('low_relevance'); score -= 20;
+  }
+  return { score: Math.max(0, score), flags };
+}
+
+// Conversation summarization
+async function summarizeConversation(conversationId: string): Promise<void> {
+  try {
+    const conv = db.data.conversations.find(c => c.id === conversationId);
+    if (!conv) return;
+    const messages = db.data.messages
+      .filter(m => m.conversation_id === conversationId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .slice(-30);
+    if (messages.length < 4) return;
+    const convoText = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const resp = await client.messages.create({
+      model: 'claude-haiku-4-5', max_tokens: 300,
+      system: 'Summarize this conversation in 2-3 sentences. Include: main topic, user needs, any action items. Be concise.',
+      messages: [{ role: 'user', content: convoText.slice(0, 5000) }],
+    });
+    const summary = (resp.content[0] as any).text as string;
+    conv.summary = summary;
+    conv.summary_at = new Date().toISOString();
+    // Attach to lead if exists
+    const agent = db.data.agents.find(a => a.id === conv.agent_id);
+    if (agent && conv.channel) {
+      const extId = (conv as any).external_id;
+      if (extId) {
+        const lead = db.data.leads?.find(l => l.agent_id === conv.agent_id && l.identifier === extId);
+        if (lead && summary) { lead.memory_summary = summary; lead.updated_at = new Date().toISOString(); }
+      }
+    }
+    save();
+  } catch { /* silent */ }
+}
+
+// Proactive follow-up check
+async function checkProactiveFollowUps(): Promise<void> {
+  try {
+    const now = new Date();
+    for (const agent of db.data.agents.filter(a => a.is_active && a.followup_enabled)) {
+      const delayMs = (agent.followup_delay_hours || 24) * 3600000;
+      const followupMsg = agent.followup_message || `Hey! Just checking in — is there anything else I can help you with?`;
+      // Find conversations that haven't been followed up and are past the delay
+      const convs = db.data.conversations.filter(c =>
+        c.agent_id === agent.id &&
+        !c.followup_sent &&
+        c.last_message_at &&
+        (now.getTime() - new Date(c.last_message_at).getTime()) > delayMs
+      );
+      for (const conv of convs.slice(0, 5)) {
+        // Only follow up if last message was from user (not agent)
+        const lastMsg = db.data.messages
+          .filter(m => m.conversation_id === conv.id)
+          .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+        if (!lastMsg || lastMsg.role !== 'user') { conv.followup_sent = true; continue; }
+        const extId = (conv as any).external_id;
+        if (!extId) { conv.followup_sent = true; continue; }
+        // Send via Telegram if that's the channel
+        if (conv.channel === 'telegram') {
+          const intg = db.data.integrations.find(i => i.user_id === agent.user_id && i.type === 'telegram' && i.connected);
+          if (intg) {
+            const { botToken } = decodeCredentials(intg.credentials);
+            const chatId = extId.replace('tg_', '');
+            if (botToken && chatId) {
+              try {
+                await sendTelegramMessage(botToken, chatId, followupMsg);
+                conv.followup_sent = true;
+                agent.total_messages++;
+                logActivity({ user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name, event_type: 'scheduled_sent', channel: 'telegram', summary: 'Proactive follow-up sent', status: 'success' });
+              } catch { /* skip */ }
+            }
+          }
+        } else {
+          conv.followup_sent = true; // mark done for non-telegram
+        }
+      }
+      // Also summarize inactive conversations (no activity for 30+ min)
+      const inactiveConvs = db.data.conversations.filter(c =>
+        c.agent_id === agent.id &&
+        !c.summary &&
+        c.last_message_at &&
+        (now.getTime() - new Date(c.last_message_at).getTime()) > 1800000
+      );
+      for (const conv of inactiveConvs.slice(0, 3)) {
+        await summarizeConversation(conv.id).catch(() => {});
+      }
+    }
+    save();
+  } catch { /* silent */ }
+}
+
+// Escalation alert creation
+async function createEscalationAlert(agent: Agent, conversationId: string, channel: string, userIdentifier: string, sentiment: string, messageSnippet: string): Promise<void> {
+  try {
+    if (!db.data.escalation_alerts) db.data.escalation_alerts = [];
+    const alert: EscalationAlert = {
+      id: randomUUID(), user_id: agent.user_id, agent_id: agent.id,
+      agent_name: agent.name, conversation_id: conversationId, channel,
+      user_identifier: userIdentifier, sentiment, message_snippet: messageSnippet.slice(0, 200),
+      created_at: new Date().toISOString(), resolved: false,
+    };
+    db.data.escalation_alerts.push(alert);
+    // Notify via Telegram if configured
+    if (agent.escalation_notify === 'telegram') {
+      const intg = db.data.integrations.find(i => i.user_id === agent.user_id && i.type === 'telegram' && i.connected);
+      if (intg) {
+        const { botToken } = decodeCredentials(intg.credentials);
+        const ownerIntg = db.data.integrations.find(i => i.user_id === agent.user_id && i.type === 'telegram' && i.connected);
+        // We don't know owner's chat_id from integrations, so we skip direct DM for now
+        // But we log and store for in-app display
+      }
+    }
+    logActivity({ user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name, event_type: 'error', channel: channel as any, summary: `Escalation: ${sentiment} message from ${userIdentifier}`, details: messageSnippet.slice(0, 200), status: 'error' });
+    save();
+  } catch { /* silent */ }
+}
+
 function recordAgentMetrics(agentId: string, responseMs: number, tokensUsed: number, sentiment: 'positive' | 'negative' | 'neutral', isFollowUp: boolean): void {
   try {
     if (!db?.data?.agent_metrics) db.data.agent_metrics = [];
@@ -1111,7 +1294,7 @@ async function startServer() {
   try {
     const { JSONFileSync } = await import('lowdb/node');
     const adapter = new JSONFileSync<DBSchema>(dbPath);
-    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [], agent_long_term_memory: [], agent_metrics: [], sms_optouts: [], broadcasts: [], approvals: [], api_keys: [] });
+    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [], agent_long_term_memory: [], agent_metrics: [], sms_optouts: [], broadcasts: [], approvals: [], api_keys: [], escalation_alerts: [] });
     try { db.read(); } catch { /* fresh */ }
     if (!db.data.scheduled_messages) db.data.scheduled_messages = [];
     if (!db.data.activity_logs) db.data.activity_logs = [];
@@ -1128,6 +1311,7 @@ async function startServer() {
     if (!db.data.broadcasts) db.data.broadcasts = [];
     if (!db.data.approvals) db.data.approvals = [];
     if (!db.data.api_keys) db.data.api_keys = [];
+    if (!db.data.escalation_alerts) db.data.escalation_alerts = [];
     db.write();
     console.log('[DipperAI] File DB:', dbPath);
   } catch {
@@ -1139,6 +1323,8 @@ async function startServer() {
   startCronRunner();
   startAutomationRunner();
   startAlwaysOnHeartbeat();
+  // Proactive follow-up runner (every 15 minutes)
+  setInterval(() => checkProactiveFollowUps().catch(() => {}), 15 * 60 * 1000);
 
   const app = express();
   app.use(cors({ origin: true, credentials: true }));
@@ -1285,7 +1471,9 @@ async function startServer() {
     if (!checkLimit(req.user, 'agents'))
       return res.status(403).json({ error: `Agent limit reached for ${req.user.plan} plan.` });
     const { name, emoji, description, systemPrompt, model, provider, templateId, autonomous_mode, response_delay_ms,
-      knowledgeText, knowledge_base, response_format, maxResponseLength, max_response_length, always_on, long_term_memory } = req.body;
+      knowledgeText, knowledge_base, response_format, maxResponseLength, max_response_length, always_on, long_term_memory,
+      tools_enabled, auto_translate, followup_enabled, followup_delay_hours, followup_message,
+      daily_digest_enabled, daily_digest_time, escalate_on_negative, escalation_notify, escalation_message } = req.body;
     if (!name || !systemPrompt) return res.status(400).json({ error: 'Name and system prompt required' });
     const agent: Agent = {
       id: randomUUID(), user_id: req.userId, name, emoji: emoji || '🤖',
@@ -1300,6 +1488,16 @@ async function startServer() {
       max_response_length: maxResponseLength || max_response_length || 500,
       always_on: always_on || false,
       long_term_memory: long_term_memory !== undefined ? long_term_memory : 1,
+      tools_enabled: tools_enabled || [],
+      auto_translate: auto_translate || false,
+      followup_enabled: followup_enabled || false,
+      followup_delay_hours: followup_delay_hours || 24,
+      followup_message: followup_message || '',
+      daily_digest_enabled: daily_digest_enabled || false,
+      daily_digest_time: daily_digest_time || '09:00',
+      escalate_on_negative: escalate_on_negative || false,
+      escalation_notify: escalation_notify || 'inapp',
+      escalation_message: escalation_message || '',
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     };
     db.data.agents.push(agent);
@@ -1318,7 +1516,9 @@ async function startServer() {
     const agent = findAgent(req.params.id, req.userId);
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
     const { name, emoji, description, systemPrompt, model, provider, autonomous_mode, response_delay_ms,
-      knowledgeText, knowledge_base, response_format, maxResponseLength, max_response_length, always_on, long_term_memory } = req.body;
+      knowledgeText, knowledge_base, response_format, maxResponseLength, max_response_length, always_on, long_term_memory,
+      tools_enabled, auto_translate, followup_enabled, followup_delay_hours, followup_message,
+      daily_digest_enabled, daily_digest_time, escalate_on_negative, escalation_notify, escalation_message } = req.body;
     if (name) agent.name = name;
     if (emoji) agent.emoji = emoji;
     if (description !== undefined) agent.description = description;
@@ -1334,6 +1534,16 @@ async function startServer() {
     if (max_response_length !== undefined) agent.max_response_length = max_response_length;
     if (always_on !== undefined) agent.always_on = always_on;
     if (long_term_memory !== undefined) agent.long_term_memory = long_term_memory;
+    if (tools_enabled !== undefined) agent.tools_enabled = tools_enabled;
+    if (auto_translate !== undefined) agent.auto_translate = auto_translate;
+    if (followup_enabled !== undefined) agent.followup_enabled = followup_enabled;
+    if (followup_delay_hours !== undefined) agent.followup_delay_hours = followup_delay_hours;
+    if (followup_message !== undefined) agent.followup_message = followup_message;
+    if (daily_digest_enabled !== undefined) agent.daily_digest_enabled = daily_digest_enabled;
+    if (daily_digest_time !== undefined) agent.daily_digest_time = daily_digest_time;
+    if (escalate_on_negative !== undefined) agent.escalate_on_negative = escalate_on_negative;
+    if (escalation_notify !== undefined) agent.escalation_notify = escalation_notify;
+    if (escalation_message !== undefined) agent.escalation_message = escalation_message;
     agent.updated_at = new Date().toISOString();
     save();
     res.json(agent);
@@ -1401,8 +1611,22 @@ async function startServer() {
       extractAndUpdateMemory(agent.id, req.userId, 'web', fullHistory, agent.system_prompt).catch(() => {});
       updateLongTermMemory(agent.id, req.userId, 'web', fullHistory).catch(() => {});
       const sentiment = analyzeSentiment(message);
+      const sentimentEnhanced = detectSentimentEnhanced(message);
       const isFollowUp = history.filter(m => m.role === 'user').length > 1;
       recordAgentMetrics(agent.id, latency_ms, tokensUsed, sentiment, isFollowUp);
+      // Update conversation last_message_at
+      const conv = db.data.conversations.find(c => c.id === convId);
+      if (conv) { conv.last_message_at = new Date().toISOString(); conv.followup_sent = false; }
+      // Quality scoring
+      const quality = scoreResponseQuality(content, message, 'web');
+      if (quality.score < 70) console.log(`[quality] agent=${agent.id} score=${quality.score} flags=${quality.flags.join(',')}`);
+      // Escalation
+      if (agent.escalate_on_negative && (sentimentEnhanced === 'negative' || sentimentEnhanced === 'urgent')) {
+        const sentConv = db.data.conversations.find(c => c.id === convId);
+        if (sentConv) sentConv.sentiment_flag = sentimentEnhanced as 'negative' | 'urgent';
+        createEscalationAlert(agent, convId, 'web', req.userId, sentimentEnhanced, message).catch(() => {});
+      }
+      save();
       logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'web', summary: 'Replied to web chat message', details: content.slice(0, 200), model_used: effectiveModel, tokens_used: tokensUsed, latency_ms, status: 'success' });
       res.json({ content, conversationId: convId, model_used: effectiveModel });
     } catch (e: any) {
@@ -3504,6 +3728,89 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     res.json({ complexity, taskType, optimalModel });
   });
 
+  // POST /api/agents/:id/tools/execute - execute a built-in tool
+  app.post('/api/agents/:id/tools/execute', auth, async (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { tool, params } = req.body;
+    if (!tool) return res.status(400).json({ error: 'tool name required' });
+    const allowedTools = agent.tools_enabled || [];
+    if (!allowedTools.includes(tool)) return res.status(403).json({ error: `Tool "${tool}" not enabled for this agent` });
+    try {
+      if (tool === 'get_current_time') {
+        return res.json({ result: new Date().toLocaleString() });
+      }
+      if (tool === 'calculate') {
+        const expr = (params?.expression || '').replace(/[^0-9+\-*/.()%\s]/g, '');
+        try { return res.json({ result: String(eval(expr)) }); }
+        catch { return res.json({ result: 'Calculation error' }); }
+      }
+      if (tool === 'search_knowledge_base') {
+        const chunks = retrieveRelevantChunks(agent.id, params?.query || '', 3);
+        return res.json({ result: chunks.join('\n\n') || 'No relevant information found.' });
+      }
+      if (tool === 'create_lead') {
+        const { name, email, phone, notes } = params || {};
+        if (!db.data.leads) db.data.leads = [];
+        const identifier = email || phone || name || randomUUID();
+        const existing = db.data.leads.find(l => l.agent_id === agent.id && l.identifier === identifier);
+        if (!existing) {
+          const now = new Date().toISOString();
+          db.data.leads.push({
+            id: randomUUID(), user_id: req.userId, agent_id: agent.id, agent_name: agent.name,
+            identifier, channel: 'web', display_name: name, email, phone,
+            stage: 'new', tags: [], notes: notes || '', message_count: 0,
+            last_contact: now, first_contact: now, created_at: now, updated_at: now,
+          });
+          save();
+          return res.json({ result: `Lead saved: ${name || email || phone}` });
+        }
+        return res.json({ result: `Lead already exists: ${name || email || phone}` });
+      }
+      if (tool === 'send_notification') {
+        const { message: notifMsg, priority } = params || {};
+        logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'automation_triggered', channel: 'system', summary: `Agent notification [${priority || 'normal'}]: ${(notifMsg || '').slice(0, 100)}`, status: 'success' });
+        return res.json({ result: 'Notification sent to agent owner.' });
+      }
+      res.status(400).json({ error: `Unknown tool: ${tool}` });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || 'Tool execution failed' });
+    }
+  });
+
+  // GET /api/escalations - list escalation alerts
+  app.get('/api/escalations', auth, (req: any, res) => {
+    if (!db.data.escalation_alerts) db.data.escalation_alerts = [];
+    const { resolved } = req.query as any;
+    let alerts = db.data.escalation_alerts.filter(a => a.user_id === req.userId);
+    if (resolved !== undefined) alerts = alerts.filter(a => a.resolved === (resolved === 'true'));
+    alerts = alerts.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 100);
+    res.json(alerts);
+  });
+
+  // PATCH /api/escalations/:id/resolve
+  app.patch('/api/escalations/:id/resolve', auth, (req: any, res) => {
+    if (!db.data.escalation_alerts) return res.status(404).json({ error: 'Not found' });
+    const alert = db.data.escalation_alerts.find(a => a.id === req.params.id && a.user_id === req.userId);
+    if (!alert) return res.status(404).json({ error: 'Not found' });
+    alert.resolved = true;
+    save();
+    res.json({ ok: true });
+  });
+
+  // GET /api/conversations/:id/summary
+  app.get('/api/conversations/:id/summary', auth, async (req: any, res) => {
+    const conv = db.data.conversations.find(c => c.id === req.params.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+    // Verify user owns the agent
+    const agent = db.data.agents.find(a => a.id === conv.agent_id && a.user_id === req.userId);
+    if (!agent) return res.status(403).json({ error: 'Forbidden' });
+    if (!conv.summary) {
+      await summarizeConversation(conv.id);
+    }
+    res.json({ summary: conv.summary, summary_at: conv.summary_at, sentiment_flag: conv.sentiment_flag });
+  });
+
   // ─── Broadcasts ────────────────────────────────────────────────────────────
 
   // GET /api/broadcasts - list all broadcasts for user
@@ -3776,6 +4083,183 @@ Now write a comprehensive final summary of what was accomplished, combining all 
       logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: channel || 'web', summary: 'Playground chat', details: reply.slice(0, 200), model_used: effectiveModel, status: 'success' });
       res.json({ reply });
     } catch (e: any) { res.status(500).json({ error: e?.message || 'AI call failed' }); }
+  });
+
+  // ─── Agent Health Monitoring ──────────────────────────────────────────────
+  app.get('/api/agents/health', requireAuth, async (req: any, res) => {
+    try {
+      const db = await getDb();
+      const agents = db.data.agents.filter((a: Agent) => a.user_id === req.user.id);
+      const now = Date.now();
+      const health = agents.map((agent: Agent) => {
+        // Determine last activity from conversations
+        const conversations = db.data.conversations.filter((c: Conversation) => c.agent_id === agent.id);
+        const lastConvDate = conversations.length > 0
+          ? Math.max(...conversations.map((c: Conversation) => new Date(c.created_at).getTime()))
+          : null;
+        // Find last message
+        const allMsgs = db.data.messages.filter((m: Message) =>
+          conversations.some((c: Conversation) => c.id === m.conversation_id)
+        );
+        const lastMsgDate = allMsgs.length > 0
+          ? Math.max(...allMsgs.map((m: Message) => new Date(m.created_at).getTime()))
+          : null;
+        const lastActivity = lastMsgDate || lastConvDate;
+        let heartbeat: 'green' | 'yellow' | 'red' = 'red';
+        if (lastActivity) {
+          const daysSince = (now - lastActivity) / (1000 * 60 * 60 * 24);
+          if (daysSince <= 1) heartbeat = 'green';
+          else if (daysSince <= 7) heartbeat = 'yellow';
+          else heartbeat = 'red';
+        }
+        // Channel connectivity
+        const hasTelegram = !!agent.deployed_telegram_token;
+        const hasDiscord = !!agent.deployed_discord_webhook;
+        const hasEmbed = !!agent.deployed_embed_enabled;
+        const channelCount = [hasTelegram, hasDiscord, hasEmbed].filter(Boolean).length;
+        return {
+          id: agent.id,
+          name: agent.name,
+          emoji: agent.emoji,
+          is_active: agent.is_active,
+          heartbeat,
+          last_activity: lastActivity ? new Date(lastActivity).toISOString() : null,
+          channels: { telegram: hasTelegram, discord: hasDiscord, embed: hasEmbed, count: channelCount },
+          total_messages: agent.total_messages || 0,
+        };
+      });
+      res.json(health);
+    } catch (e: any) { res.status(500).json({ error: e?.message }); }
+  });
+
+  // ─── Agent Duplication ────────────────────────────────────────────────────
+  app.post('/api/agents/:id/duplicate', requireAuth, async (req: any, res) => {
+    try {
+      const db = await getDb();
+      const source = db.data.agents.find((a: Agent) => a.id === req.params.id && a.user_id === req.user.id);
+      if (!source) return res.status(404).json({ error: 'Agent not found' });
+      const newAgent: Agent = {
+        ...source,
+        id: randomUUID(),
+        name: `Copy of ${source.name}`,
+        embed_token: randomUUID(),
+        total_messages: 0,
+        is_active: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        deployed_telegram_token: undefined,
+        deployed_discord_webhook: undefined,
+        deployed_embed_enabled: false,
+      };
+      db.data.agents.push(newAgent);
+      await db.write();
+      res.json(newAgent);
+    } catch (e: any) { res.status(500).json({ error: e?.message }); }
+  });
+
+  // ─── Conversation Search ──────────────────────────────────────────────────
+  app.get('/api/conversations/search', requireAuth, async (req: any, res) => {
+    try {
+      const db = await getDb();
+      const { q = '', agent: agentId = '', channel = '', limit = '50', offset = '0' } = req.query as any;
+      // Get user's agents
+      const userAgentIds = new Set(
+        db.data.agents.filter((a: Agent) => a.user_id === req.user.id).map((a: Agent) => a.id)
+      );
+      // Filter conversations
+      let convs = db.data.conversations.filter((c: Conversation) => userAgentIds.has(c.agent_id));
+      if (agentId) convs = convs.filter((c: Conversation) => c.agent_id === agentId);
+      if (channel) convs = convs.filter((c: Conversation) => c.channel === channel);
+      // Search messages
+      const results: any[] = [];
+      for (const conv of convs) {
+        const msgs = db.data.messages.filter((m: Message) => m.conversation_id === conv.id);
+        const agent = db.data.agents.find((a: Agent) => a.id === conv.agent_id);
+        if (q) {
+          const matchingMsgs = msgs.filter((m: Message) => m.content.toLowerCase().includes(q.toLowerCase()));
+          if (matchingMsgs.length === 0) continue;
+          results.push({
+            conversation_id: conv.id,
+            agent_id: conv.agent_id,
+            agent_name: agent?.name || 'Unknown',
+            agent_emoji: agent?.emoji || '🤖',
+            channel: conv.channel,
+            message_count: msgs.length,
+            matching_messages: matchingMsgs.slice(0, 3).map((m: Message) => ({
+              id: m.id, role: m.role, content: m.content.substring(0, 200), created_at: m.created_at,
+            })),
+            last_message_at: msgs.length > 0 ? msgs[msgs.length - 1].created_at : conv.created_at,
+            created_at: conv.created_at,
+          });
+        } else {
+          results.push({
+            conversation_id: conv.id,
+            agent_id: conv.agent_id,
+            agent_name: agent?.name || 'Unknown',
+            agent_emoji: agent?.emoji || '🤖',
+            channel: conv.channel,
+            message_count: msgs.length,
+            preview: msgs.slice(-1)[0]?.content.substring(0, 100) || '',
+            last_message_at: msgs.length > 0 ? msgs[msgs.length - 1].created_at : conv.created_at,
+            created_at: conv.created_at,
+          });
+        }
+      }
+      // Sort by last activity
+      results.sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
+      const total = results.length;
+      const paginated = results.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+      res.json({ results: paginated, total });
+    } catch (e: any) { res.status(500).json({ error: e?.message }); }
+  });
+
+  // ─── Export Endpoints ─────────────────────────────────────────────────────
+  app.get('/api/activity/export', requireAuth, async (req: any, res) => {
+    try {
+      const db = await getDb();
+      const logs = db.data.activityLogs.filter((l: ActivityLog) => l.user_id === req.user.id);
+      const headers = ['id', 'agent_name', 'event_type', 'channel', 'summary', 'status', 'model_used', 'tokens_used', 'latency_ms', 'created_at'];
+      const csvRows = [headers.join(',')];
+      for (const l of logs) {
+        csvRows.push([
+          l.id, `"${(l.agent_name || '').replace(/"/g, '""')}"`, l.event_type, l.channel,
+          `"${(l.summary || '').replace(/"/g, '""')}"`, l.status,
+          l.model_used || '', l.tokens_used || '', l.latency_ms || '',
+          l.created_at,
+        ].join(','));
+      }
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="activity.csv"');
+      res.send(csvRows.join('\n'));
+    } catch (e: any) { res.status(500).json({ error: e?.message }); }
+  });
+
+  app.get('/api/leads/export', requireAuth, async (req: any, res) => {
+    try {
+      const db = await getDb();
+      const leads = db.data.leads.filter((l: Lead) => l.user_id === req.user.id);
+      const headers = ['id', 'display_name', 'email', 'phone', 'channel', 'stage', 'agent_name', 'message_count', 'tags', 'notes', 'deal_value', 'created_at', 'last_seen'];
+      const csvRows = [headers.join(',')];
+      for (const l of leads) {
+        csvRows.push([
+          l.id,
+          `"${(l.display_name || '').replace(/"/g, '""')}"`,
+          `"${(l.email || '').replace(/"/g, '""')}"`,
+          `"${(l.phone || '').replace(/"/g, '""')}"`,
+          l.channel, l.stage,
+          `"${(l.agent_name || '').replace(/"/g, '""')}"`,
+          l.message_count || 0,
+          `"${(l.tags || []).join(';')}"`,
+          `"${(l.notes || '').replace(/"/g, '""')}"`,
+          l.deal_value || 0,
+          l.created_at,
+          l.last_seen || '',
+        ].join(','));
+      }
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="leads.csv"');
+      res.send(csvRows.join('\n'));
+    } catch (e: any) { res.status(500).json({ error: e?.message }); }
   });
 
   // ─── Frontend ─────────────────────────────────────────────────────────────

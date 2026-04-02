@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
-import { Plus, Search, MessageSquare, Circle, Edit3, Bot, Headphones, TrendingUp, User, Sparkles, ArrowRight, LayoutGrid, List, Trash2, Pause, Play, Zap } from 'lucide-react'
+import { Plus, Search, MessageSquare, Circle, Edit3, Bot, Headphones, TrendingUp, User, Sparkles, ArrowRight, LayoutGrid, List, Trash2, Pause, Play, Zap, CheckSquare, Square, MoveRight, X, ChevronDown, Copy } from 'lucide-react'
 import UpgradeModal from '../components/UpgradeModal'
 
 interface Agent {
@@ -21,6 +21,8 @@ interface Agent {
 type SortOption = 'most_active' | 'recently_created' | 'alphabetical'
 type FilterStatus = 'All' | 'Active' | 'Paused'
 type ViewMode = 'grid' | 'list'
+
+interface Team { id: string; name: string }
 
 const AGENT_TEMPLATES = [
   {
@@ -86,6 +88,14 @@ export default function Agents() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [showUpgradeModal, setShowUpgradeModal] = useState(false)
   const [agentLimit, setAgentLimit] = useState<number | null>(null)
+  // Bulk ops state
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkMode, setBulkMode] = useState(false)
+  const [teams, setTeams] = useState<Team[]>([])
+  const [transferAgentId, setTransferAgentId] = useState<string | null>(null)
+  const [transferTeamId, setTransferTeamId] = useState('')
+  const [transferring, setTransferring] = useState(false)
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
 
   const getToken = () => {
     try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
@@ -113,6 +123,11 @@ export default function Agents() {
       .then(data => { if (data?.usage?.agents) setAgentLimit(data.usage.agents.limit) })
       .catch(() => {})
       .finally(() => setLoading(false))
+    // Load teams for transfer
+    fetch('/api/teams', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { if (Array.isArray(data)) setTeams(data) })
+      .catch(() => {})
   }, [])
 
   const handleDelete = async (agentId: string) => {
@@ -121,6 +136,21 @@ export default function Agents() {
     await fetch(`/api/agents/${agentId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => {})
     setAgents(prev => prev.filter(a => a.id !== agentId))
     setDeleteConfirm(null)
+  }
+
+  const handleDuplicate = async (agentId: string) => {
+    const token = getToken()
+    if (!token) return
+    const res = await fetch(`/api/agents/${agentId}/duplicate`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => null)
+    if (res?.ok) {
+      const newAgent = await res.json()
+      setAgents(prev => [...prev, {
+        id: newAgent.id, name: newAgent.name, status: 'paused',
+        model: newAgent.model || '', channels: newAgent.channels || [],
+        description: newAgent.description, emoji: newAgent.emoji,
+        total_messages: 0, messages_today: 0, last_active: undefined, always_on: false,
+      }])
+    }
   }
 
   const handleTogglePause = async (agent: Agent) => {
@@ -133,6 +163,56 @@ export default function Agents() {
       body: JSON.stringify({ isActive: newStatus }),
     }).catch(() => {})
     setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, status: newStatus ? 'active' : 'paused' } : a))
+  }
+
+  const toggleSelect = (id: string) => {
+    setSelected(prev => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
+
+  const selectAll = () => setSelected(new Set(filtered.map(a => a.id)))
+  const clearSelect = () => { setSelected(new Set()); setBulkMode(false) }
+
+  const bulkPause = async (pause: boolean) => {
+    const token = getToken()
+    await Promise.all([...selected].map(id =>
+      fetch(`/api/agents/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ isActive: !pause }),
+      }).catch(() => {})
+    ))
+    setAgents(prev => prev.map(a => selected.has(a.id) ? { ...a, status: pause ? 'paused' : 'active' } : a))
+    clearSelect()
+  }
+
+  const bulkDelete = async () => {
+    const token = getToken()
+    await Promise.all([...selected].map(id =>
+      fetch(`/api/agents/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => {})
+    ))
+    setAgents(prev => prev.filter(a => !selected.has(a.id)))
+    setBulkDeleteConfirm(false)
+    clearSelect()
+  }
+
+  const handleTransfer = async () => {
+    if (!transferAgentId || !transferTeamId) return
+    setTransferring(true)
+    const token = getToken()
+    try {
+      await fetch(`/api/agents/${transferAgentId}/transfer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ teamId: transferTeamId }),
+      })
+    } catch {}
+    setTransferring(false)
+    setTransferAgentId(null)
+    setTransferTeamId('')
   }
 
   let filtered = agents.filter(a => {
@@ -203,6 +283,39 @@ export default function Agents() {
         </div>
       </div>
 
+      {/* Bulk Actions Bar */}
+      {bulkMode && (
+        <div className="flex items-center gap-3 mb-4 bg-violet-600/10 border border-violet-500/20 rounded-xl px-4 py-3 flex-wrap">
+          <span className="text-sm font-semibold text-violet-300">{selected.size} selected</span>
+          <button onClick={selectAll} className="text-xs text-slate-400 hover:text-slate-200 transition-colors">Select all</button>
+          <div className="flex gap-2 ml-auto flex-wrap">
+            <button onClick={() => bulkPause(false)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all disabled:opacity-50" disabled={selected.size === 0}>
+              <Play size={11} /> Resume
+            </button>
+            <button onClick={() => bulkPause(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 transition-all disabled:opacity-50" disabled={selected.size === 0}>
+              <Pause size={11} /> Pause
+            </button>
+            {!bulkDeleteConfirm ? (
+              <button onClick={() => setBulkDeleteConfirm(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all disabled:opacity-50" disabled={selected.size === 0}>
+                <Trash2 size={11} /> Delete
+              </button>
+            ) : (
+              <button onClick={bulkDelete} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 transition-all">
+                <Trash2 size={11} /> Confirm Delete {selected.size}
+              </button>
+            )}
+            <button onClick={clearSelect} className="p-1.5 rounded-lg border border-[#1e1e2e] text-slate-500 hover:text-slate-300 transition-all">
+              <X size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+      {!bulkMode && agents.length > 0 && (
+        <button onClick={() => setBulkMode(true)} className="mb-4 flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors">
+          <CheckSquare size={13} /> Bulk select
+        </button>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <div className="w-6 h-6 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin" />
@@ -255,9 +368,14 @@ export default function Agents() {
             const badge = modelBadge(agent.model)
             return (
               <div key={agent.id}
-                className={`group bg-[#111118] border rounded-xl p-5 hover:border-violet-500/30 hover:bg-violet-500/[0.03] transition-all cursor-pointer relative ${agent.always_on ? 'border-violet-500/30 shadow-[0_0_20px_rgba(139,92,246,0.08)]' : 'border-[#1e1e2e]'}`}
-                onClick={() => navigate(`/dashboard/agents/${agent.id}`)}>
-                {/* Always-on glow indicator */}
+                className={`group bg-[#111118] border rounded-xl p-5 hover:border-violet-500/30 hover:bg-violet-500/[0.03] transition-all cursor-pointer relative ${agent.always_on ? 'border-violet-500/30 shadow-[0_0_20px_rgba(139,92,246,0.08)]' : selected.has(agent.id) ? 'border-violet-500/50' : 'border-[#1e1e2e]'}`}
+                onClick={() => bulkMode ? toggleSelect(agent.id) : navigate(`/dashboard/agents/${agent.id}`)}>
+                {/* Bulk checkbox */}
+                {bulkMode && (
+                  <div className="absolute top-3 left-3 z-10" onClick={e => { e.stopPropagation(); toggleSelect(agent.id) }}>
+                    {selected.has(agent.id) ? <CheckSquare size={16} className="text-violet-400" /> : <Square size={16} className="text-slate-600" />}
+                  </div>
+                )}
                 {agent.always_on && (
                   <div className="absolute top-3 right-3 flex items-center gap-1 text-xs text-violet-400 bg-violet-500/10 border border-violet-500/20 px-2 py-0.5 rounded-full">
                     <Zap size={10} className="fill-violet-400" /> Always-on
@@ -309,6 +427,12 @@ export default function Agents() {
                     className="p-1.5 rounded-lg border border-[#1e1e2e] text-slate-500 hover:bg-white/5 hover:text-white transition-all">
                     {agent.status === 'active' ? <Pause size={13} /> : <Play size={13} />}
                   </button>
+                  {teams.length > 0 && (
+                    <button onClick={() => { setTransferAgentId(agent.id); setTransferTeamId(teams[0]?.id || '') }} title="Transfer to client"
+                      className="p-1.5 rounded-lg border border-[#1e1e2e] text-slate-500 hover:bg-white/5 hover:text-violet-400 transition-all">
+                      <MoveRight size={13} />
+                    </button>
+                  )}
                   {deleteConfirm === agent.id ? (
                     <button onClick={() => handleDelete(agent.id)}
                       className="p-1.5 rounded-lg bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30 transition-all text-xs font-semibold px-2">
@@ -393,6 +517,35 @@ export default function Agents() {
           }).catch(() => alert('Connection error'))
         }}
       />
+    )}
+
+    {/* Transfer Agent Modal */}
+    {transferAgentId && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={e => { if (e.target === e.currentTarget) setTransferAgentId(null) }}>
+        <div className="bg-[#12121a] border border-[#1e1e2e] rounded-2xl w-full max-w-sm shadow-2xl">
+          <div className="px-6 py-5 border-b border-[#1e1e2e]">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2"><MoveRight size={18} className="text-violet-400" /> Transfer to Client</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Move this agent to a client workspace (team)</p>
+          </div>
+          <div className="px-6 py-5 space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1.5">Select Client</label>
+              <select value={transferTeamId} onChange={e => setTransferTeamId(e.target.value)}
+                className="w-full px-3 py-2.5 text-sm bg-white/5 border border-[#1e1e2e] rounded-xl focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white">
+                {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="px-6 py-4 border-t border-[#1e1e2e] flex gap-3 justify-end">
+            <button onClick={() => setTransferAgentId(null)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 hover:bg-white/5 rounded-xl transition-colors">Cancel</button>
+            <button onClick={handleTransfer} disabled={transferring || !transferTeamId}
+              className="gradient-btn flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-60">
+              {transferring ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <MoveRight size={14} />}
+              Transfer
+            </button>
+          </div>
+        </div>
+      </div>
     )}
     </>
   )

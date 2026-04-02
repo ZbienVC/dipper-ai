@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Bot, LayoutTemplate, Plug, CheckSquare,
   BarChart2, CreditCard, Settings, Bell, Search,
-  LogOut, ChevronDown, Menu, X, User, Zap, Activity, Users2, Users, FlaskConical, Radio
+  LogOut, ChevronDown, Menu, X, User, Zap, Activity, Users2, Users, FlaskConical, Radio, FileText
 } from 'lucide-react'
 
 const navItems: { icon: React.ElementType; label: string; path: string; badge?: string | number }[] = [
@@ -19,6 +19,7 @@ const navItems: { icon: React.ElementType; label: string; path: string; badge?: 
   { icon: Activity, label: 'Activity', path: '/dashboard/activity' },
   { icon: Zap, label: 'Automations', path: '/dashboard/automations' },
   { icon: BarChart2, label: 'Analytics', path: '/dashboard/analytics' },
+  { icon: FileText, label: 'Reports', path: '/dashboard/reports', badge: 'NEW' },
   { icon: FlaskConical, label: 'Playground', path: '/dashboard/playground' },
   { icon: CreditCard, label: 'Billing', path: '/dashboard/billing' },
   { icon: Settings, label: 'Settings', path: '/dashboard/settings' },
