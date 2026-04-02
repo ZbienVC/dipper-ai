@@ -1754,6 +1754,518 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.delete('/api/integrations/:type', auth, (req: any, res) => {
+    const { type } = req.params;
+    const idx = db.data.integrations.findIndex(i => i.user_id === req.userId && i.type === type);
+    if (idx !== -1) { db.data.integrations.splice(idx, 1); save(); }
+    res.json({ success: true });
+  });
+
+  // ─── Phase 3: Test integration endpoint ──────────────────────────────────
+  app.post('/api/integrations/:type/test', auth, async (req: any, res) => {
+    const { type } = req.params;
+    const { credentials } = req.body;
+    try {
+      if (type === 'telegram') {
+        const token = credentials?.botToken || credentials?.token;
+        if (!token) return res.status(400).json({ error: 'botToken required' });
+        const r = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+        const d: any = await r.json();
+        if (!d.ok) return res.status(400).json({ error: 'Invalid token', details: d.description });
+        return res.json({ success: true, bot_username: d.result.username, bot_name: d.result.first_name });
+      }
+      if (type === 'sms') {
+        const { accountSid, authToken } = credentials || {};
+        if (!accountSid || !authToken) return res.status(400).json({ error: 'accountSid and authToken required' });
+        const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}.json`, {
+          headers: { Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}` },
+        });
+        if (!r.ok) return res.status(400).json({ error: 'Invalid Twilio credentials' });
+        const d: any = await r.json();
+        return res.json({ success: true, account_name: d.friendly_name, status: d.status });
+      }
+      if (type === 'discord') {
+        const token = credentials?.botToken || credentials?.token;
+        if (!token) return res.status(400).json({ error: 'botToken required' });
+        const r = await fetch('https://discord.com/api/v10/users/@me', { headers: { Authorization: `Bot ${token}` } });
+        if (!r.ok) return res.status(400).json({ error: 'Invalid Discord bot token' });
+        const d: any = await r.json();
+        return res.json({ success: true, bot_username: d.username, bot_id: d.id });
+      }
+      if (type === 'twitter') {
+        const { bearerToken } = credentials || {};
+        if (!bearerToken) return res.status(400).json({ error: 'bearerToken required' });
+        const r = await fetch('https://api.twitter.com/2/users/me', {
+          headers: { Authorization: `Bearer ${bearerToken}` },
+        });
+        if (!r.ok) return res.status(400).json({ error: 'Invalid Twitter/X credentials' });
+        const d: any = await r.json();
+        return res.json({ success: true, username: d.data?.username, name: d.data?.name });
+      }
+      if (type === 'reddit') {
+        const { clientId, clientSecret } = credentials || {};
+        if (!clientId || !clientSecret) return res.status(400).json({ error: 'clientId and clientSecret required' });
+        const r = await fetch('https://www.reddit.com/api/v1/access_token', {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'DipperAI/1.0',
+          },
+          body: 'grant_type=client_credentials',
+        });
+        if (!r.ok) return res.status(400).json({ error: 'Invalid Reddit credentials' });
+        return res.json({ success: true, message: 'Reddit credentials valid' });
+      }
+      return res.status(400).json({ error: `Unknown integration type: ${type}` });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || 'Test failed' });
+    }
+  });
+
+  // ─── Telegram verify endpoint ─────────────────────────────────────────────
+  app.get('/api/integrations/telegram/verify/:token', async (req, res) => {
+    try {
+      const r = await fetch(`https://api.telegram.org/bot${req.params.token}/getMe`);
+      const d: any = await r.json();
+      if (!d.ok) return res.status(400).json({ error: d.description });
+      res.json({ valid: true, bot: d.result });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ─── SMS verify + delivery status ────────────────────────────────────────
+  app.get('/api/integrations/sms/verify', auth, async (req: any, res) => {
+    const intg = db.data.integrations.find(i => i.user_id === req.userId && i.type === 'sms' && i.connected);
+    if (!intg) return res.status(404).json({ error: 'No SMS integration found' });
+    const { accountSid, authToken } = decodeCredentials(intg.credentials);
+    try {
+      const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}.json`, {
+        headers: { Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}` },
+      });
+      if (!r.ok) return res.status(400).json({ error: 'Twilio credentials invalid' });
+      const d: any = await r.json();
+      res.json({ valid: true, account_name: d.friendly_name, status: d.status });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message });
+    }
+  });
+
+  app.post('/api/webhooks/sms/status', express.urlencoded({ extended: false }), (req, res) => {
+    const { MessageSid, MessageStatus, To, ErrorCode } = req.body;
+    console.log(`[SMS status] ${MessageSid} -> ${MessageStatus} to ${To}${ErrorCode ? ' err:' + ErrorCode : ''}`);
+    res.sendStatus(204);
+  });
+
+  // ─── Discord interactions endpoint (slash commands) ──────────────────────
+  app.get('/api/integrations/discord/verify', auth, async (req: any, res) => {
+    const intg = db.data.integrations.find(i => i.user_id === req.userId && i.type === 'discord' && i.connected);
+    if (!intg) return res.status(404).json({ error: 'No Discord integration found' });
+    const { botToken } = decodeCredentials(intg.credentials);
+    try {
+      const r = await fetch('https://discord.com/api/v10/users/@me', { headers: { Authorization: `Bot ${botToken}` } });
+      if (!r.ok) return res.status(400).json({ error: 'Invalid bot token' });
+      const d: any = await r.json();
+      // Return a bot invite link
+      const inviteUrl = `https://discord.com/api/oauth2/authorize?client_id=${d.id}&permissions=2048&scope=bot%20applications.commands`;
+      res.json({ valid: true, bot: d, invite_url: inviteUrl });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message });
+    }
+  });
+
+  app.post('/api/integrations/discord/interactions', async (req, res) => {
+    // Discord interaction endpoint - verify signature and handle slash commands
+    const body = req.body;
+
+    // Handle PING (Discord verification)
+    if (body.type === 1) {
+      return res.json({ type: 1 });
+    }
+
+    // Handle application commands
+    if (body.type === 2) {
+      const guildId = body.guild_id;
+      const userId = body.member?.user?.id || body.user?.id;
+      const commandName = body.data?.name;
+      const messageText = body.data?.options?.[0]?.value || '';
+
+      // Find an integration matching this guild
+      const allDiscordIntgs = db.data.integrations.filter(i => i.type === 'discord' && i.connected);
+      let matchedIntg: Integration | undefined;
+      for (const intg of allDiscordIntgs) {
+        const creds = decodeCredentials(intg.credentials);
+        if (!guildId || creds.guildId === guildId || !creds.guildId) {
+          matchedIntg = intg;
+          break;
+        }
+      }
+
+      if (!matchedIntg || !matchedIntg.agent_id) {
+        return res.json({ type: 4, data: { content: 'No agent configured for this server.', flags: 64 } });
+      }
+
+      const agent = db.data.agents.find(a => a.id === matchedIntg!.agent_id && a.is_active);
+      if (!agent) {
+        return res.json({ type: 4, data: { content: 'Agent not found.', flags: 64 } });
+      }
+
+      // Respond immediately with deferred response (type 5), then edit later
+      // For simplicity, we'll do inline response (type 4) with AI call
+      try {
+        const history = [{ role: 'user', content: messageText }];
+        const systemPrompt = buildAgentSystemPrompt(agent);
+        const { text: reply } = await callAI(agent.provider, agent.model, systemPrompt, history, 512);
+        logActivity({
+          user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name,
+          event_type: 'message_sent', channel: 'discord',
+          summary: `Replied to Discord slash command /${commandName}`,
+          details: reply.slice(0, 200), status: 'success',
+        });
+        agent.total_messages++;
+        save();
+        return res.json({ type: 4, data: { content: reply.slice(0, 2000) } });
+      } catch (e: any) {
+        return res.json({ type: 4, data: { content: `Error: ${e?.message}`, flags: 64 } });
+      }
+    }
+
+    res.json({ type: 1 });
+  });
+
+  // ─── Twitter/X OAuth 2.0 + tweet endpoints ───────────────────────────────
+  app.get('/api/integrations/twitter/auth', auth, (req: any, res) => {
+    const clientId = process.env.TWITTER_CLIENT_ID;
+    if (!clientId) return res.status(400).json({ error: 'TWITTER_CLIENT_ID not configured' });
+    const codeVerifier = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
+    const state = `${req.userId}:${codeVerifier}`;
+    const stateEncoded = Buffer.from(state).toString('base64url');
+    const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
+    const redirectUri = `${appUrl}/api/integrations/twitter/callback`;
+    const scope = 'tweet.read tweet.write users.read offline.access';
+    const authUrl = `https://twitter.com/i/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${stateEncoded}&code_challenge=${codeVerifier.slice(0, 43)}&code_challenge_method=plain`;
+    res.json({ auth_url: authUrl, state: stateEncoded });
+  });
+
+  app.get('/api/integrations/twitter/callback', async (req, res) => {
+    const { code, state } = req.query as any;
+    if (!code || !state) return res.status(400).send('Missing code or state');
+    try {
+      const decoded = Buffer.from(state, 'base64url').toString('utf-8');
+      const [userId, codeVerifier] = decoded.split(':');
+      const clientId = process.env.TWITTER_CLIENT_ID;
+      const clientSecret = process.env.TWITTER_CLIENT_SECRET;
+      if (!clientId) return res.status(400).send('Twitter not configured');
+      const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
+      const redirectUri = `${appUrl}/api/integrations/twitter/callback`;
+      const tokenResp = await fetch('https://api.twitter.com/2/oauth2/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          ...(clientSecret ? { Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}` } : {}),
+        },
+        body: new URLSearchParams({
+          code, grant_type: 'authorization_code',
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          code_verifier: codeVerifier.slice(0, 43),
+        }).toString(),
+      });
+      const tokenData: any = await tokenResp.json();
+      if (!tokenData.access_token) return res.status(400).send('Failed to get access token: ' + JSON.stringify(tokenData));
+
+      // Get user info
+      const meResp = await fetch('https://api.twitter.com/2/users/me', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      const meData: any = await meResp.json();
+      const username = meData.data?.username || 'unknown';
+
+      const existing = db.data.integrations.find(i => i.user_id === userId && i.type === 'twitter');
+      if (existing) {
+        existing.access_token = tokenData.access_token;
+        existing.refresh_token = tokenData.refresh_token;
+        existing.token_expiry = tokenData.expires_in ? Date.now() + tokenData.expires_in * 1000 : undefined;
+        existing.bot_info = username;
+        existing.connected = true;
+        existing.token_data = JSON.stringify(tokenData);
+      } else {
+        db.data.integrations.push({
+          id: randomUUID(), user_id: userId, type: 'twitter',
+          credentials: encodeCredentials({ username }),
+          access_token: tokenData.access_token,
+          refresh_token: tokenData.refresh_token,
+          token_expiry: tokenData.expires_in ? Date.now() + tokenData.expires_in * 1000 : undefined,
+          bot_info: username, connected: true,
+          token_data: JSON.stringify(tokenData),
+          created_at: new Date().toISOString(),
+        });
+      }
+      save();
+      const appUrlRedirect = process.env.APP_URL || `http://localhost:${PORT}`;
+      res.redirect(`${appUrlRedirect}/dashboard/integrations?twitter=connected`);
+    } catch (e: any) {
+      res.status(500).send('Error: ' + e?.message);
+    }
+  });
+
+  app.post('/api/integrations/twitter/tweet', auth, async (req: any, res) => {
+    const intg = db.data.integrations.find(i => i.user_id === req.userId && i.type === 'twitter' && i.connected);
+    if (!intg?.access_token) return res.status(400).json({ error: 'Twitter not connected or no OAuth token. Use /api/integrations/twitter/auth flow.' });
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: 'text required' });
+    try {
+      const r = await fetch('https://api.twitter.com/2/tweets', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${intg.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const d: any = await r.json();
+      if (!r.ok) return res.status(400).json({ error: d?.detail || 'Tweet failed', details: d });
+      res.json({ success: true, tweet_id: d.data?.id, text: d.data?.text });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message });
+    }
+  });
+
+  app.post('/api/integrations/twitter/check-mentions', auth, async (req: any, res) => {
+    const intg = db.data.integrations.find(i => i.user_id === req.userId && i.type === 'twitter' && i.connected);
+    if (!intg?.access_token) return res.status(400).json({ error: 'Twitter not connected with OAuth token' });
+    const agentId = intg.agent_id || req.body.agent_id;
+    if (!agentId) return res.status(400).json({ error: 'No agent assigned to Twitter integration' });
+    const agent = findAgent(agentId, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    try {
+      // Get authenticated user id
+      const meR = await fetch('https://api.twitter.com/2/users/me', {
+        headers: { Authorization: `Bearer ${intg.access_token}` },
+      });
+      const meD: any = await meR.json();
+      const userId2 = meD.data?.id;
+      if (!userId2) return res.status(400).json({ error: 'Could not get Twitter user ID' });
+
+      // Get recent mentions
+      const sinceId = req.body.since_id;
+      let url = `https://api.twitter.com/2/users/${userId2}/mentions?max_results=10&tweet.fields=author_id,text,created_at`;
+      if (sinceId) url += `&since_id=${sinceId}`;
+      const mentionsR = await fetch(url, { headers: { Authorization: `Bearer ${intg.access_token}` } });
+      const mentionsD: any = await mentionsR.json();
+      const mentions = mentionsD.data || [];
+      const replied: any[] = [];
+
+      for (const mention of mentions) {
+        try {
+          const { text: aiReply } = await callAI(agent.provider, agent.model,
+            buildAgentSystemPrompt(agent),
+            [{ role: 'user', content: mention.text }], 280);
+          const replyText = aiReply.slice(0, 280);
+          const postR = await fetch('https://api.twitter.com/2/tweets', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${intg.access_token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: replyText, reply: { in_reply_to_tweet_id: mention.id } }),
+          });
+          const postD: any = await postR.json();
+          replied.push({ mention_id: mention.id, reply_id: postD.data?.id });
+        } catch { /* skip individual errors */ }
+      }
+
+      res.json({ mentions_found: mentions.length, replied: replied.length, last_mention_id: mentions[0]?.id });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ─── Reddit OAuth + monitoring ────────────────────────────────────────────
+  app.get('/api/integrations/reddit/auth', auth, (req: any, res) => {
+    const clientId = process.env.REDDIT_CLIENT_ID;
+    if (!clientId) return res.status(400).json({ error: 'REDDIT_CLIENT_ID not configured' });
+    const state = Buffer.from(req.userId).toString('base64url');
+    const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
+    const redirectUri = `${appUrl}/api/integrations/reddit/callback`;
+    const authUrl = `https://www.reddit.com/api/v1/authorize?client_id=${clientId}&response_type=code&state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}&duration=permanent&scope=read,submit,identity`;
+    res.json({ auth_url: authUrl });
+  });
+
+  app.get('/api/integrations/reddit/callback', async (req, res) => {
+    const { code, state } = req.query as any;
+    if (!code || !state) return res.status(400).send('Missing code or state');
+    try {
+      const userId = Buffer.from(state, 'base64url').toString('utf-8');
+      const clientId = process.env.REDDIT_CLIENT_ID;
+      const clientSecret = process.env.REDDIT_CLIENT_SECRET;
+      if (!clientId || !clientSecret) return res.status(400).send('Reddit not configured');
+      const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
+      const redirectUri = `${appUrl}/api/integrations/reddit/callback`;
+      const tokenResp = await fetch('https://www.reddit.com/api/v1/access_token', {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'DipperAI/1.0',
+        },
+        body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }).toString(),
+      });
+      const tokenData: any = await tokenResp.json();
+      if (!tokenData.access_token) return res.status(400).send('Failed: ' + JSON.stringify(tokenData));
+
+      const meResp = await fetch('https://oauth.reddit.com/api/v1/me', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}`, 'User-Agent': 'DipperAI/1.0' },
+      });
+      const meData: any = await meResp.json();
+      const username = meData.name || 'unknown';
+
+      const existing = db.data.integrations.find(i => i.user_id === userId && i.type === 'reddit');
+      if (existing) {
+        existing.access_token = tokenData.access_token;
+        existing.refresh_token = tokenData.refresh_token;
+        existing.bot_info = username;
+        existing.connected = true;
+      } else {
+        db.data.integrations.push({
+          id: randomUUID(), user_id: userId, type: 'reddit',
+          credentials: encodeCredentials({ username }),
+          access_token: tokenData.access_token,
+          refresh_token: tokenData.refresh_token,
+          bot_info: username, connected: true,
+          created_at: new Date().toISOString(),
+        });
+      }
+      save();
+      const appUrlRedirect = process.env.APP_URL || `http://localhost:${PORT}`;
+      res.redirect(`${appUrlRedirect}/dashboard/integrations?reddit=connected`);
+    } catch (e: any) {
+      res.status(500).send('Error: ' + e?.message);
+    }
+  });
+
+  app.post('/api/integrations/reddit/monitor', auth, async (req: any, res) => {
+    const intg = db.data.integrations.find(i => i.user_id === req.userId && i.type === 'reddit' && i.connected);
+    if (!intg?.access_token) return res.status(400).json({ error: 'Reddit not connected. Use /api/integrations/reddit/auth first.' });
+    const { subreddit, keyword, agent_id } = req.body;
+    if (!subreddit || !keyword) return res.status(400).json({ error: 'subreddit and keyword required' });
+    if (agent_id) {
+      const agent = findAgent(agent_id, req.userId);
+      if (!agent) return res.status(404).json({ error: 'Agent not found' });
+      intg.agent_id = agent_id;
+    }
+    // Store monitor config in token_data
+    const config = JSON.parse(intg.token_data || '{}');
+    config.monitor = { subreddit, keyword, last_checked: null };
+    intg.token_data = JSON.stringify(config);
+    save();
+    res.json({ success: true, message: `Now monitoring r/${subreddit} for "${keyword}"` });
+  });
+
+  app.post('/api/integrations/reddit/post', auth, async (req: any, res) => {
+    const intg = db.data.integrations.find(i => i.user_id === req.userId && i.type === 'reddit' && i.connected);
+    if (!intg?.access_token) return res.status(400).json({ error: 'Reddit not connected' });
+    const { subreddit, title, text, kind = 'self' } = req.body;
+    if (!subreddit || !title) return res.status(400).json({ error: 'subreddit and title required' });
+    try {
+      const r = await fetch('https://oauth.reddit.com/api/submit', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${intg.access_token}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'DipperAI/1.0',
+        },
+        body: new URLSearchParams({ sr: subreddit, kind, title, text: text || '', resubmit: 'true' }).toString(),
+      });
+      const d: any = await r.json();
+      if (d.jquery) {
+        // Reddit's legacy response format
+        return res.json({ success: true, url: d.jquery?.find?.((j: any) => j[2] === 'call' && j[3]?.[0]?.includes('reddit.com'))?.[3]?.[0] });
+      }
+      res.json({ success: true, data: d });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message });
+    }
+  });
+
+  // ─── Web Chat public endpoints ────────────────────────────────────────────
+  // Rate limit store for webchat
+  const webchatRateLimit = new Map<string, { count: number; resetAt: number }>();
+  // Rate limit store for SMS (1 message per user per 5 seconds)
+  const smsRateLimit = new Map<string, number>();
+
+  app.get('/api/integrations/webchat/config/:agentId', async (req, res) => {
+    const agent = db.data.agents.find(a => a.id === req.params.agentId && a.is_active && a.deployed_embed_enabled);
+    if (!agent) return res.status(404).json({ error: 'Agent not found or embed not enabled' });
+    res.json({
+      agentId: agent.id,
+      name: agent.name,
+      emoji: agent.emoji,
+      description: agent.description,
+      embed_token: agent.embed_token,
+      response_format: agent.response_format || 'conversational',
+    });
+  });
+
+  app.post('/api/integrations/webchat/chat', async (req, res) => {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown';
+    const now = Date.now();
+    const rateKey = `webchat:${ip}`;
+    let rateInfo = webchatRateLimit.get(rateKey);
+    if (!rateInfo || rateInfo.resetAt < now) {
+      rateInfo = { count: 0, resetAt: now + 3600000 };
+    }
+    rateInfo.count++;
+    webchatRateLimit.set(rateKey, rateInfo);
+    if (rateInfo.count > 20) {
+      return res.status(429).json({ error: 'Rate limit exceeded (20 messages/hour per IP)' });
+    }
+
+    const { agentId, message, conversationId, sessionToken } = req.body;
+    if (!agentId || !message) return res.status(400).json({ error: 'agentId and message required' });
+
+    const agent = db.data.agents.find(a => a.id === agentId && a.is_active && a.deployed_embed_enabled);
+    if (!agent) return res.status(404).json({ error: 'Agent not found or embed disabled' });
+
+    let convId = conversationId;
+    if (!convId) {
+      convId = randomUUID();
+      db.data.conversations.push({ id: convId, agent_id: agent.id, user_id: undefined, channel: 'web', message_count: 0, created_at: new Date().toISOString() });
+    }
+    const history = db.data.messages.filter(m => m.conversation_id === convId).map(m => ({ role: m.role, content: m.content }));
+    history.push({ role: 'user', content: message });
+    const userIdentifier = sessionToken || `webchat_${ip}`;
+
+    try {
+      const memCtx = buildMemoryContext(agent.id, userIdentifier, 'web');
+      const knCtx = buildKnowledgeContext(agent.id, message);
+      const basePrompt = buildAgentSystemPrompt(agent, knCtx ? `${knCtx}\n\n${agent.system_prompt}` : agent.system_prompt);
+      const systemPrompt = memCtx ? `${memCtx}\n\n${basePrompt}` : basePrompt;
+      const { text: content, tokensUsed } = await callAI(agent.provider, agent.model, systemPrompt, history, 1024);
+      db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
+      db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: agent.model, created_at: new Date().toISOString() });
+      agent.total_messages++;
+      save();
+      extractAndUpdateMemory(agent.id, userIdentifier, 'web', [...history, { role: 'assistant', content }], agent.system_prompt).catch(() => {});
+      res.json({ content, conversationId: convId });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || 'AI call failed' });
+    }
+  });
+
+  // ─── Enhanced Telegram: split long messages ───────────────────────────────
+  // (already handled by helper, but add chunk helper)
+  async function sendTelegramLongMessage(botToken: string, chatId: string | number, text: string) {
+    const MAX_LEN = 4096;
+    if (text.length <= MAX_LEN) {
+      return sendTelegramMessage(botToken, chatId, text);
+    }
+    const chunks: string[] = [];
+    let remaining = text;
+    while (remaining.length > 0) {
+      chunks.push(remaining.slice(0, MAX_LEN));
+      remaining = remaining.slice(MAX_LEN);
+    }
+    for (const chunk of chunks) {
+      await sendTelegramMessage(botToken, chatId, chunk);
+    }
+  }
+
   // ─── Telegram webhook (improved) ──────────────────────────────────────────
   app.post('/api/integrations/telegram/webhook/:agentId', async (req, res) => {
     const { agentId } = req.params;
@@ -1762,6 +2274,47 @@ async function startServer() {
       const update = req.body;
       const agent = db.data.agents.find(a => a.id === agentId && a.is_active);
       if (!agent) return;
+
+      // Handle callback_query (inline button presses)
+      if (update.callback_query) {
+        const cq = update.callback_query;
+        const chatId = cq.message?.chat?.id;
+        const integration = db.data.integrations.find(i => i.user_id === agent.user_id && i.type === 'telegram' && i.connected);
+        if (integration && chatId) {
+          const { botToken } = decodeCredentials(integration.credentials);
+          if (botToken) {
+            await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ callback_query_id: cq.id, text: 'Processing...' }),
+            });
+            if (cq.data) {
+              const { text: reply } = await callAI(agent.provider, agent.model, buildAgentSystemPrompt(agent), [{ role: 'user', content: cq.data }], 512);
+              await sendTelegramMessage(botToken, chatId, reply);
+            }
+          }
+        }
+        return;
+      }
+
+      // Handle inline_query
+      if (update.inline_query) {
+        const iq = update.inline_query;
+        const integration = db.data.integrations.find(i => i.user_id === agent.user_id && i.type === 'telegram' && i.connected);
+        if (integration && iq.query) {
+          const { botToken } = decodeCredentials(integration.credentials);
+          if (botToken) {
+            const { text: reply } = await callAI(agent.provider, agent.model, buildAgentSystemPrompt(agent), [{ role: 'user', content: iq.query }], 256);
+            await fetch(`https://api.telegram.org/bot${botToken}/answerInlineQuery`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                inline_query_id: iq.id,
+                results: [{ type: 'article', id: '1', title: agent.name, input_message_content: { message_text: reply } }],
+              }),
+            });
+          }
+        }
+        return;
+      }
 
       const msg = update?.message || update?.channel_post;
       if (!msg?.text) return;
@@ -1785,8 +2338,13 @@ async function startServer() {
       }
 
       if (text === '/help') {
-        const helpText = `🤖 *${agent.name}* Help\n\n/start — Start the conversation\n/help — Show this help\n\nJust send me a message and I'll respond!`;
+        const helpText = `🤖 *${agent.name}* Help\n\n/start — Start the conversation\n/help — Show this help\n/stop — Stop receiving messages\n\nJust send me a message and I'll respond!`;
         await sendTelegramMessage(botToken, chatId, helpText);
+        return;
+      }
+
+      if (text === '/stop') {
+        await sendTelegramMessage(botToken, chatId, `You've been unsubscribed from ${agent.name}. Send /start to resubscribe.`);
         return;
       }
 
@@ -1834,7 +2392,7 @@ async function startServer() {
         await new Promise(r => setTimeout(r, Math.min(agent.response_delay_ms!, 5000)));
       }
 
-      await sendTelegramMessage(botToken, chatId, reply);
+      await sendTelegramLongMessage(botToken, chatId, reply);
       agent.total_messages++;
       save();
       // Async memory extraction
@@ -1852,6 +2410,31 @@ async function startServer() {
     try {
       const { From, To, Body } = req.body;
       if (!Body || !To) return;
+
+      // Check SMS opt-out
+      if (!db.data.sms_optouts) db.data.sms_optouts = [];
+      const OPT_OUT_WORDS = ['STOP', 'UNSUBSCRIBE', 'QUIT', 'CANCEL', 'END'];
+      const OPT_IN_WORDS = ['START', 'YES', 'UNSTOP'];
+      const bodyUpper = Body.trim().toUpperCase();
+      if (OPT_OUT_WORDS.includes(bodyUpper)) {
+        if (!db.data.sms_optouts.find(o => o.phone === From)) {
+          db.data.sms_optouts.push({ phone: From, opted_out_at: Date.now() });
+          save();
+        }
+        return;
+      }
+      if (OPT_IN_WORDS.includes(bodyUpper)) {
+        db.data.sms_optouts = db.data.sms_optouts.filter(o => o.phone !== From);
+        save();
+        return;
+      }
+      if (db.data.sms_optouts.find(o => o.phone === From)) return;
+
+      // SMS rate limiting: 1 message per 5 seconds per number
+      const nowMs = Date.now();
+      const lastSmsTime = smsRateLimit.get(From) || 0;
+      if (nowMs - lastSmsTime < 5000) return; // silently drop
+      smsRateLimit.set(From, nowMs);
 
       const integrations = db.data.integrations.filter(i => i.type === 'sms' && i.connected);
       let matchedIntg: Integration | undefined;
