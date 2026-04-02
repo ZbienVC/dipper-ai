@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import cors from 'cors';
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -4051,8 +4051,7 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     if (!db.data.api_keys) db.data.api_keys = [];
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: 'Name required' });
-    const crypto = require('crypto');
-    const key = 'dpr_' + crypto.randomBytes(24).toString('hex');
+    const key = 'dpr_' + randomUUID().replace(/-/g,'') + randomUUID().replace(/-/g,'').slice(0,16);
     const id = randomUUID();
     const preview = key.slice(0, 8) + '...' + key.slice(-4);
     (db.data.api_keys as any[]).push({ id, user_id: req.userId, name, key, key_preview: preview, created_at: Date.now() });
