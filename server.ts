@@ -370,6 +370,32 @@ async function callAI(provider: string, model: string, systemPrompt: string, mes
   throw new Error(`Unknown provider: ${provider}`);
 }
 
+// Build system prompt incorporating agent knowledge base + response format
+function buildAgentSystemPrompt(agent: Agent, contextPrompt?: string): string {
+  const base = contextPrompt || agent.system_prompt;
+  const parts: string[] = [base];
+
+  if (agent.knowledge_base && agent.knowledge_base.trim()) {
+    parts.unshift(`=== Agent Knowledge Base ===\n${agent.knowledge_base.trim()}\n=== End Knowledge Base ===`);
+  }
+
+  if (agent.response_format && agent.response_format !== 'conversational') {
+    if (agent.response_format === 'bullet_points') {
+      parts.push('Format your responses using bullet points where appropriate.');
+    } else if (agent.response_format === 'structured') {
+      parts.push('Format your responses in a clear, structured format with headers and sections as needed.');
+    } else if (agent.response_format === 'brief') {
+      parts.push('Keep responses very concise — 1-3 sentences max unless more detail is truly needed.');
+    }
+  }
+
+  if (agent.max_response_length && agent.max_response_length > 0) {
+    parts.push(`Keep responses under ${agent.max_response_length} words.`);
+  }
+
+  return parts.join('\n\n');
+}
+
 // ─── Integration Helpers ─────────────────────────────────────────────────────
 function encodeCredentials(creds: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
@@ -1076,6 +1102,9 @@ async function startServer() {
     if (!db.data.team_tasks) db.data.team_tasks = [];
     if (!db.data.team_task_logs) db.data.team_task_logs = [];
     if (!db.data.leads) db.data.leads = [];
+    if (!db.data.agent_long_term_memory) db.data.agent_long_term_memory = [];
+    if (!db.data.agent_metrics) db.data.agent_metrics = [];
+    if (!db.data.sms_optouts) db.data.sms_optouts = [];
     db.write();
     console.log('[DipperAI] File DB:', dbPath);
   } catch {
@@ -1163,14 +1192,43 @@ async function startServer() {
   app.get('/api/templates', (_req, res) => res.json(AGENT_TEMPLATES));
 
   // ─── Agents ───────────────────────────────────────────────────────────────
+
+  function enrichAgent(agent: Agent) {
+    const now = Date.now();
+    const oneDayAgo = new Date(now - 86400000).toISOString();
+    const sevenDaysAgo = new Date(now - 7 * 86400000).toISOString();
+    const agentLogs = db.data.activity_logs?.filter(l => l.agent_id === agent.id) || [];
+    const msgLogs = agentLogs.filter(l => l.event_type === 'message_sent');
+    const lastLog = agentLogs.sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+    const connectedChannels = (db.data.integrations || [])
+      .filter(i => i.agent_id === agent.id && i.connected)
+      .map(i => i.type);
+    if (agent.deployed_embed_enabled) connectedChannels.push('webchat');
+    const uniqueUsers7d = new Set(
+      agentLogs.filter(l => l.created_at >= sevenDaysAgo).map(l => l.channel)
+    ).size;
+    return {
+      ...agent,
+      last_activity: lastLog?.created_at || agent.updated_at,
+      message_count_today: msgLogs.filter(l => l.created_at >= oneDayAgo).length,
+      total_messages: agent.total_messages,
+      active_users: uniqueUsers7d,
+      status: agent.is_active ? 'active' : 'paused',
+      connected_channels: connectedChannels,
+    };
+  }
+
   app.get('/api/agents', auth, (req: any, res) => {
-    res.json(db.data.agents.filter(a => a.user_id === req.userId && a.is_active).sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    const agents = db.data.agents.filter(a => a.user_id === req.userId && a.is_active)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    res.json(agents.map(enrichAgent));
   });
 
   app.post('/api/agents', auth, (req: any, res) => {
     if (!checkLimit(req.user, 'agents'))
       return res.status(403).json({ error: `Agent limit reached for ${req.user.plan} plan.` });
-    const { name, emoji, description, systemPrompt, model, provider, templateId, autonomous_mode, response_delay_ms } = req.body;
+    const { name, emoji, description, systemPrompt, model, provider, templateId, autonomous_mode, response_delay_ms,
+      knowledgeText, knowledge_base, response_format, maxResponseLength, max_response_length, always_on, long_term_memory } = req.body;
     if (!name || !systemPrompt) return res.status(400).json({ error: 'Name and system prompt required' });
     const agent: Agent = {
       id: randomUUID(), user_id: req.userId, name, emoji: emoji || '🤖',
@@ -1180,6 +1238,11 @@ async function startServer() {
       embed_token: randomUUID().replace(/-/g, ''), deployed_embed_enabled: false,
       autonomous_mode: autonomous_mode || false,
       response_delay_ms: response_delay_ms || 0,
+      knowledge_base: knowledgeText || knowledge_base || undefined,
+      response_format: response_format || 'conversational',
+      max_response_length: maxResponseLength || max_response_length || 500,
+      always_on: always_on || false,
+      long_term_memory: long_term_memory !== undefined ? long_term_memory : 1,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     };
     db.data.agents.push(agent);
@@ -1197,7 +1260,8 @@ async function startServer() {
   app.put('/api/agents/:id', auth, (req: any, res) => {
     const agent = findAgent(req.params.id, req.userId);
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
-    const { name, emoji, description, systemPrompt, model, provider, autonomous_mode, response_delay_ms } = req.body;
+    const { name, emoji, description, systemPrompt, model, provider, autonomous_mode, response_delay_ms,
+      knowledgeText, knowledge_base, response_format, maxResponseLength, max_response_length, always_on, long_term_memory } = req.body;
     if (name) agent.name = name;
     if (emoji) agent.emoji = emoji;
     if (description !== undefined) agent.description = description;
@@ -1206,6 +1270,13 @@ async function startServer() {
     if (provider) agent.provider = provider;
     if (autonomous_mode !== undefined) agent.autonomous_mode = autonomous_mode;
     if (response_delay_ms !== undefined) agent.response_delay_ms = response_delay_ms;
+    if (knowledgeText !== undefined) agent.knowledge_base = knowledgeText;
+    if (knowledge_base !== undefined) agent.knowledge_base = knowledge_base;
+    if (response_format !== undefined) agent.response_format = response_format;
+    if (maxResponseLength !== undefined) agent.max_response_length = maxResponseLength;
+    if (max_response_length !== undefined) agent.max_response_length = max_response_length;
+    if (always_on !== undefined) agent.always_on = always_on;
+    if (long_term_memory !== undefined) agent.long_term_memory = long_term_memory;
     agent.updated_at = new Date().toISOString();
     save();
     res.json(agent);
@@ -2676,6 +2747,64 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     lead.updated_at = new Date().toISOString();
     save();
     res.json(lead);
+  });
+
+  // ═══ Intelligence API Endpoints ══════════════════════════════════════════
+
+  // GET /api/agents/:id/intelligence/memory - long-term memory for a user
+  app.get('/api/agents/:id/intelligence/memory', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    if (!db.data.agent_long_term_memory) return res.json([]);
+    const memories = db.data.agent_long_term_memory.filter(m => m.agent_id === agent.id);
+    res.json(memories);
+  });
+
+  // DELETE /api/agents/:id/intelligence/memory/:memId
+  app.delete('/api/agents/:id/intelligence/memory/:memId', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    if (!db.data.agent_long_term_memory) return res.json({ success: true });
+    db.data.agent_long_term_memory = db.data.agent_long_term_memory.filter(
+      m => !(m.agent_id === agent.id && m.id === req.params.memId)
+    );
+    save();
+    res.json({ success: true });
+  });
+
+  // GET /api/agents/:id/intelligence/metrics - performance metrics
+  app.get('/api/agents/:id/intelligence/metrics', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    if (!db.data.agent_metrics) return res.json([]);
+    const metrics = db.data.agent_metrics
+      .filter(m => m.agent_id === agent.id)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 30);
+    res.json(metrics);
+  });
+
+  // PATCH /api/agents/:id/always-on - toggle always-on mode
+  app.patch('/api/agents/:id/always-on', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { always_on } = req.body;
+    agent.always_on = typeof always_on === 'boolean' ? always_on : !agent.always_on;
+    agent.updated_at = new Date().toISOString();
+    save();
+    res.json(agent);
+  });
+
+  // POST /api/agents/:id/intelligence/assess - assess message complexity
+  app.post('/api/agents/:id/intelligence/assess', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: 'message required' });
+    const complexity = assessComplexity(message);
+    const taskType = detectTaskType(message);
+    const optimalModel = selectOptimalModel(agent, message.length, taskType);
+    res.json({ complexity, taskType, optimalModel });
   });
 
   // ─── Frontend ─────────────────────────────────────────────────────────────
