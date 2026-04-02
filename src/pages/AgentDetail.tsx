@@ -136,6 +136,14 @@ export default function AgentDetail() {
   const [capEscalationNotify, setCapEscalationNotify] = useState('inapp')
   const [capSaving, setCapSaving] = useState(false)
   const [capSaved, setCapSaved] = useState(false)
+  // Tool integration config state
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [webhookSecret, setWebhookSecret] = useState('')
+  const [calendlyLink, setCalendlyLink] = useState('')
+  const [sheetsSpreadsheetId, setSheetsSpreadsheetId] = useState('')
+  const [sheetsRange, setSheetsRange] = useState('Sheet1!A:F')
+  const [stripeApiKey, setStripeApiKey] = useState('')
+  const [toolTestResult, setToolTestResult] = useState<Record<string, string>>({})
 
   useEffect(() => {
     const token = getToken()
@@ -175,6 +183,13 @@ export default function AgentDetail() {
       setCapFollowupMessage(agent.followup_message || '')
       setCapEscalateOnNeg(!!agent.escalate_on_negative)
       setCapEscalationNotify(agent.escalation_notify || 'inapp')
+      // Tool integration config
+      setWebhookUrl((agent as any).webhook_url || '')
+      setWebhookSecret((agent as any).webhook_secret || '')
+      setCalendlyLink((agent as any).calendly_link || '')
+      setSheetsSpreadsheetId((agent as any).sheets_spreadsheet_id || '')
+      setSheetsRange((agent as any).sheets_range || 'Sheet1!A:F')
+      setStripeApiKey((agent as any).stripe_api_key || '')
     }
   }, [agent?.id])
 
@@ -289,6 +304,12 @@ export default function AgentDetail() {
           followup_message: capFollowupMessage,
           escalate_on_negative: capEscalateOnNeg,
           escalation_notify: capEscalationNotify,
+          webhook_url: webhookUrl,
+          webhook_secret: webhookSecret,
+          calendly_link: calendlyLink,
+          sheets_spreadsheet_id: sheetsSpreadsheetId,
+          sheets_range: sheetsRange,
+          stripe_api_key: stripeApiKey,
         }),
       })
       if (res.ok) {
@@ -1553,6 +1574,10 @@ export default function AgentDetail() {
       { name: 'search_knowledge_base', label: 'Knowledge Search', desc: 'Agent explicitly searches its knowledge base mid-conversation.' },
       { name: 'create_lead', label: 'Lead Capture', desc: 'Agent saves user contact info (name/email/phone) to your CRM automatically.' },
       { name: 'send_notification', label: 'Owner Notifications', desc: 'Agent flags important messages to you via the Activity feed.' },
+      { name: 'webhook', label: 'Webhook / HTTP', desc: 'Agent triggers an external URL when key actions happen (form submitted, purchase, booking confirmed).' },
+      { name: 'calendly', label: 'Calendly Booking', desc: 'Agent automatically shares your booking link when users want to schedule a meeting or call.' },
+      { name: 'google_sheets', label: 'Google Sheets', desc: 'Agent logs leads and captured data directly to a Google Sheet.' },
+      { name: 'stripe_payment_link', label: 'Stripe Payments', desc: 'Agent generates secure payment links for specific amounts during conversations.' },
     ]
     const toggleTool = (name: string) => {
       setCapToolsEnabled(prev => prev.includes(name) ? prev.filter(t => t !== name) : [...prev, name])
@@ -1624,6 +1649,71 @@ export default function AgentDetail() {
           ))}
         </div>
       </div>
+
+      {/* Webhook config */}
+      {capToolsEnabled.includes('webhook') && (
+        <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 space-y-3">
+          <h3 className="font-semibold text-white text-sm">🔗 Webhook Configuration</h3>
+          <p className="text-xs text-slate-500">Your agent will POST to this URL when key actions occur.</p>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Webhook URL</label>
+            <input value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} className={inputClass} placeholder="https://hooks.example.com/webhook" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Secret (optional)</label>
+            <input value={webhookSecret} onChange={e => setWebhookSecret(e.target.value)} className={inputClass} placeholder="Optional HMAC secret" type="password" />
+          </div>
+          <button onClick={async () => {
+            const token = getToken(); if (!token || !agent) return
+            const r = await fetch(`/api/agents/${agent.id}/tools/execute`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ tool: 'webhook', user_message: 'test', data: { test: true } }) }).then(r => r.json()).catch(() => ({ ok: false }))
+            setToolTestResult(p => ({ ...p, webhook: r.ok ? '✓ Webhook fired successfully' : `✗ ${r.error || 'Failed'}` }))
+          }} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-semibold">Test Webhook</button>
+          {toolTestResult.webhook && <p className="text-xs text-slate-400">{toolTestResult.webhook}</p>}
+        </div>
+      )}
+
+      {/* Calendly config */}
+      {capToolsEnabled.includes('calendly') && (
+        <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 space-y-3">
+          <h3 className="font-semibold text-white text-sm">📅 Calendly Configuration</h3>
+          <p className="text-xs text-slate-500">Your agent will share this booking link when users want to schedule a meeting.</p>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Calendly Link</label>
+            <input value={calendlyLink} onChange={e => setCalendlyLink(e.target.value)} className={inputClass} placeholder="https://calendly.com/yourname/meeting" />
+          </div>
+          <p className="text-xs text-slate-500">💡 Agent will automatically detect booking intent ("schedule", "book", "meeting", "call") and share this link.</p>
+        </div>
+      )}
+
+      {/* Google Sheets config */}
+      {capToolsEnabled.includes('google_sheets') && (
+        <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 space-y-3">
+          <h3 className="font-semibold text-white text-sm">📊 Google Sheets Configuration</h3>
+          <p className="text-xs text-slate-500">Captured leads and data will be appended to your spreadsheet.</p>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Spreadsheet ID</label>
+            <input value={sheetsSpreadsheetId} onChange={e => setSheetsSpreadsheetId(e.target.value)} className={inputClass} placeholder="Find in URL: spreadsheets/d/[ID]/edit" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Range (default: Sheet1!A:F)</label>
+            <input value={sheetsRange} onChange={e => setSheetsRange(e.target.value)} className={inputClass} placeholder="Sheet1!A:F" />
+          </div>
+          <p className="text-xs text-slate-500">⚠️ Requires <code className="bg-black/30 px-1 rounded">GOOGLE_SHEETS_API_KEY</code> in your server environment.</p>
+        </div>
+      )}
+
+      {/* Stripe config */}
+      {capToolsEnabled.includes('stripe_payment_link') && (
+        <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 space-y-3">
+          <h3 className="font-semibold text-white text-sm">💳 Stripe Configuration</h3>
+          <p className="text-xs text-slate-500">Your agent will generate payment links during conversations.</p>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Stripe Secret Key</label>
+            <input value={stripeApiKey} onChange={e => setStripeApiKey(e.target.value)} className={inputClass} placeholder="sk_live_..." type="password" />
+          </div>
+          <p className="text-xs text-yellow-500/80">⚠️ This key is stored to generate payment links on your behalf. Use a restricted key if possible.</p>
+        </div>
+      )}
 
       {/* Language */}
       <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">

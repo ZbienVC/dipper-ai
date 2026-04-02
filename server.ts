@@ -50,6 +50,14 @@ type Agent = {
   escalate_on_negative?: boolean;
   escalation_notify?: 'inapp' | 'telegram' | 'email';
   escalation_message?: string;
+  // Tool integrations
+  webhook_url?: string;
+  webhook_secret?: string;
+  calendly_link?: string;
+  calendly_api_key?: string;
+  sheets_spreadsheet_id?: string;
+  sheets_range?: string;
+  stripe_api_key?: string;
 };
 type Message = { id: string; conversation_id: string; role: string; content: string; model_used?: string; created_at: string; };
 type Conversation = { id: string; agent_id: string; user_id?: string; channel: string; message_count: number; created_at: string; summary?: string; summary_at?: string; sentiment_flag?: 'negative' | 'urgent' | null; last_message_at?: string; followup_sent?: boolean; };
@@ -440,6 +448,10 @@ function buildAgentSystemPrompt(agent: Agent, contextPrompt?: string): string {
     if (agent.tools_enabled.includes('calculate')) toolDescs.push('- calculate: You can perform mathematical calculations when asked.');
     if (agent.tools_enabled.includes('create_lead')) toolDescs.push('- create_lead: When a user shares contact info (name/email/phone), confirm you\'ve saved them as a lead.');
     if (agent.tools_enabled.includes('send_notification')) toolDescs.push('- send_notification: You can flag urgent matters to the agent owner.');
+    if (agent.tools_enabled.includes('webhook') && agent.webhook_url) toolDescs.push("- webhook: You can trigger external actions/integrations. When the user completes an action that needs processing (like submitting a form, completing a purchase, booking confirmed), say \"I've triggered the action\" and the webhook will fire automatically.");
+    if (agent.tools_enabled.includes('calendly') && agent.calendly_link) toolDescs.push(`- calendly: When a user wants to schedule a call, meeting, or appointment, share this booking link: ${agent.calendly_link} — say something like "You can book a time here: [link]"`);
+    if (agent.tools_enabled.includes('google_sheets') && agent.sheets_spreadsheet_id) toolDescs.push('- google_sheets: When you capture a lead or the user completes an action, the data is automatically logged to Google Sheets.');
+    if (agent.tools_enabled.includes('stripe') && agent.stripe_api_key) toolDescs.push("- stripe: You can generate payment links for specific amounts. When a user wants to pay, say the amount and you'll provide a secure payment link. Example: \"Here's your payment link for $50: [link]\"");
     if (toolDescs.length > 0) parts.push(`You have the following capabilities:\n${toolDescs.join('\n')}`);
   }
 
@@ -1518,7 +1530,8 @@ async function startServer() {
     const { name, emoji, description, systemPrompt, model, provider, autonomous_mode, response_delay_ms,
       knowledgeText, knowledge_base, response_format, maxResponseLength, max_response_length, always_on, long_term_memory,
       tools_enabled, auto_translate, followup_enabled, followup_delay_hours, followup_message,
-      daily_digest_enabled, daily_digest_time, escalate_on_negative, escalation_notify, escalation_message } = req.body;
+      daily_digest_enabled, daily_digest_time, escalate_on_negative, escalation_notify, escalation_message,
+      webhook_url, webhook_secret, calendly_link, calendly_api_key, sheets_spreadsheet_id, sheets_range, stripe_api_key } = req.body;
     if (name) agent.name = name;
     if (emoji) agent.emoji = emoji;
     if (description !== undefined) agent.description = description;
@@ -1544,6 +1557,13 @@ async function startServer() {
     if (escalate_on_negative !== undefined) agent.escalate_on_negative = escalate_on_negative;
     if (escalation_notify !== undefined) agent.escalation_notify = escalation_notify;
     if (escalation_message !== undefined) agent.escalation_message = escalation_message;
+    if (webhook_url !== undefined) agent.webhook_url = webhook_url;
+    if (webhook_secret !== undefined) agent.webhook_secret = webhook_secret;
+    if (calendly_link !== undefined) agent.calendly_link = calendly_link;
+    if (calendly_api_key !== undefined) agent.calendly_api_key = calendly_api_key;
+    if (sheets_spreadsheet_id !== undefined) agent.sheets_spreadsheet_id = sheets_spreadsheet_id;
+    if (sheets_range !== undefined) agent.sheets_range = sheets_range;
+    if (stripe_api_key !== undefined) agent.stripe_api_key = stripe_api_key;
     agent.updated_at = new Date().toISOString();
     save();
     res.json(agent);
@@ -3771,6 +3791,75 @@ Now write a comprehensive final summary of what was accomplished, combining all 
         const { message: notifMsg, priority } = params || {};
         logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'automation_triggered', channel: 'system', summary: `Agent notification [${priority || 'normal'}]: ${(notifMsg || '').slice(0, 100)}`, status: 'success' });
         return res.json({ result: 'Notification sent to agent owner.' });
+      }
+      // Webhook tool
+      if (tool === 'webhook') {
+        if (!agent.webhook_url) return res.json({ ok: false, error: 'No webhook URL configured' });
+        const payload = {
+          agent_id: agent.id,
+          user_message: req.body.user_message || '',
+          conversation_id: req.body.conversation_id || '',
+          timestamp: Date.now(),
+          custom_data: req.body.data || {}
+        };
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        try {
+          const r = await fetch(agent.webhook_url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(agent.webhook_secret ? { 'X-Webhook-Secret': agent.webhook_secret } : {}) },
+            body: JSON.stringify(payload),
+            signal: controller.signal
+          });
+          clearTimeout(timeout);
+          return res.json({ ok: r.ok, status: r.status, result: r.ok ? 'Webhook triggered successfully.' : `Webhook returned status ${r.status}` });
+        } catch (e: any) {
+          clearTimeout(timeout);
+          return res.json({ ok: false, error: e.message });
+        }
+      }
+      // Google Sheets tool
+      if (tool === 'google_sheets') {
+        if (!agent.sheets_spreadsheet_id) return res.json({ ok: false, error: 'No spreadsheet ID configured' });
+        if (!process.env.GOOGLE_SHEETS_API_KEY) return res.json({ ok: false, error: 'GOOGLE_SHEETS_API_KEY not set in environment' });
+        const { name: gName, email: gEmail, phone: gPhone, message: gMessage } = req.body;
+        const values = [[
+          new Date().toISOString(),
+          gName || '',
+          gEmail || '',
+          gPhone || '',
+          gMessage || '',
+          agent.name || ''
+        ]];
+        try {
+          const url = `https://sheets.googleapis.com/v4/spreadsheets/${agent.sheets_spreadsheet_id}/values/${encodeURIComponent(agent.sheets_range || 'Sheet1!A:F')}:append?valueInputOption=USER_ENTERED&key=${process.env.GOOGLE_SHEETS_API_KEY}`;
+          const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values }) });
+          return res.json({ ok: r.ok, result: r.ok ? 'Data logged to Google Sheets.' : `Sheets API error: ${r.status}` });
+        } catch (e: any) {
+          return res.json({ ok: false, error: e.message });
+        }
+      }
+      // Stripe payment link tool
+      if (tool === 'stripe_payment_link') {
+        if (!agent.stripe_api_key) return res.json({ ok: false, error: 'No Stripe API key configured' });
+        const { amount, currency = 'usd', description: stripeDesc = 'Payment' } = req.body;
+        if (!amount) return res.json({ ok: false, error: 'amount required' });
+        try {
+          const r = await fetch('https://api.stripe.com/v1/payment_links', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${agent.stripe_api_key}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              'line_items[0][price_data][currency]': currency,
+              'line_items[0][price_data][unit_amount]': String(Math.round(Number(amount) * 100)),
+              'line_items[0][price_data][product_data][name]': stripeDesc,
+              'line_items[0][quantity]': '1'
+            })
+          });
+          const data = await r.json() as any;
+          return res.json({ ok: r.ok, payment_link: data.url, result: r.ok ? `Payment link created: ${data.url}` : data.error?.message, error: data.error?.message });
+        } catch (e: any) {
+          return res.json({ ok: false, error: e.message });
+        }
       }
       res.status(400).json({ error: `Unknown tool: ${tool}` });
     } catch (e: any) {
