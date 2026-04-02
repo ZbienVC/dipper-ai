@@ -28,6 +28,7 @@ const Playground = lazy(() => import('./pages/Playground'))
 const Broadcasts = lazy(() => import('./pages/Broadcasts'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Onboarding = lazy(() => import('./pages/Onboarding'))
+const ConversationSearch = lazy(() => import('./pages/ConversationSearch'))
 
 function PageLoader() {
   return (
@@ -78,6 +79,7 @@ function App() {
           <Route path="/dashboard/broadcasts" element={<PrivateRoute><Broadcasts /></PrivateRoute>} />
           <Route path="/dashboard/reports" element={<PrivateRoute><Reports /></PrivateRoute>} />
           <Route path="/onboarding" element={<PrivateRoute><Onboarding /></PrivateRoute>} />
+          <Route path="/dashboard/search" element={<PrivateRoute><ConversationSearch /></PrivateRoute>} />
 
           <Route path="/admin" element={<Admin />} />
 
