@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
-import { X, Check, Loader2, Plug, AlertCircle, ExternalLink } from 'lucide-react'
+import { X, Check, Loader2, Plug, AlertCircle, ExternalLink, Copy, Zap, Clock } from 'lucide-react'
 
 interface IntegrationRecord {
   id: string
@@ -10,6 +10,8 @@ interface IntegrationRecord {
   bot_info?: string
   agent_id?: string
   created_at: string
+  last_activity?: string
+  error?: string
 }
 
 const INTEGRATION_META: Record<string, {
@@ -17,13 +19,15 @@ const INTEGRATION_META: Record<string, {
   description: string
   icon: string
   instructions: string
+  webhookPath: string
   fields: { key: string; label: string; placeholder: string; type?: string }[]
 }> = {
   telegram: {
     name: 'Telegram',
     description: 'Deploy your agents as Telegram bots. Reach your audience where they already are.',
     icon: '✈️',
-    instructions: '1. Open Telegram and search for @BotFather\n2. Send /newbot and follow the prompts\n3. Copy the bot token provided\n4. Paste it below',
+    instructions: '1. Open Telegram and search for @BotFather\n2. Send /newbot and follow the prompts to create your bot\n3. BotFather will give you a Bot Token — copy it\n4. Paste the token below and click Connect\n5. DipperAI will automatically set up the webhook for you',
+    webhookPath: '/webhooks/telegram',
     fields: [
       { key: 'botToken', label: 'Bot Token', placeholder: '123456789:ABCDefgh...', type: 'password' },
     ],
@@ -32,7 +36,8 @@ const INTEGRATION_META: Record<string, {
     name: 'Discord',
     description: 'Add your agent to any Discord server. Moderate, answer, and engage your community.',
     icon: '🎮',
-    instructions: '1. Go to discord.com/developers/applications\n2. Create New Application, go to Bot section\n3. Copy the Bot Token\n4. Enable Message Content Intent under Privileged Gateway Intents\n5. Get your Server ID by right-clicking your server (enable Developer Mode first)\n6. Paste below',
+    instructions: '1. Go to discord.com/developers/applications\n2. Create New Application, then go to the Bot section\n3. Click "Reset Token" and copy your Bot Token\n4. Under Privileged Gateway Intents, enable "Message Content Intent"\n5. Right-click your server (enable Developer Mode first) to copy your Server ID\n6. Paste credentials below and click Connect',
+    webhookPath: '/webhooks/discord',
     fields: [
       { key: 'botToken', label: 'Bot Token', placeholder: 'Your Discord Bot Token', type: 'password' },
       { key: 'guildId', label: 'Server ID', placeholder: 'Discord Server (Guild) ID' },
@@ -43,7 +48,8 @@ const INTEGRATION_META: Record<string, {
     name: 'SMS / Twilio',
     description: 'Send and receive SMS messages via Twilio. Connect your agents to any phone number.',
     icon: '📱',
-    instructions: '1. Sign up at twilio.com\n2. Get a phone number from the console\n3. Find your Account SID and Auth Token on the dashboard\n4. Paste below',
+    instructions: '1. Sign up at twilio.com and verify your account\n2. Purchase a phone number from the Twilio console\n3. Copy your Account SID and Auth Token from the dashboard\n4. Enter your Twilio phone number below\n5. After connecting, copy the Webhook URL and paste it in Twilio → Phone Numbers → Messaging',
+    webhookPath: '/webhooks/sms',
     fields: [
       { key: 'accountSid', label: 'Account SID', placeholder: 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' },
       { key: 'authToken', label: 'Auth Token', placeholder: 'Your Twilio Auth Token', type: 'password' },
@@ -54,7 +60,8 @@ const INTEGRATION_META: Record<string, {
     name: 'X / Twitter',
     description: 'Auto-respond to mentions, DMs, and threads. Keep your X presence always active.',
     icon: '🐦',
-    instructions: '1. Go to developer.twitter.com\n2. Create a project and app\n3. Generate API Key and Access Token with Read+Write permissions\n4. Paste below',
+    instructions: '1. Go to developer.twitter.com and sign in\n2. Create a new Project and App\n3. Under "Keys and Tokens", generate API Key + Secret and Access Token + Secret\n4. Set Read+Write permissions on your app\n5. Paste all four credentials below',
+    webhookPath: '/webhooks/twitter',
     fields: [
       { key: 'apiKey', label: 'API Key', placeholder: 'Your X API Key' },
       { key: 'apiSecret', label: 'API Secret', placeholder: 'Your X API Secret', type: 'password' },
@@ -70,6 +77,21 @@ function getToken() {
   try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
 }
 
+function getBaseUrl() {
+  return window.location.origin
+}
+
+function timeAgo(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime()
+  const s = Math.floor(diff / 1000)
+  if (s < 60) return `${s}s ago`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
+}
+
 export default function Integrations() {
   const navigate = useNavigate()
   const [records, setRecords] = useState<IntegrationRecord[]>([])
@@ -81,6 +103,9 @@ export default function Integrations() {
   const [errorMsg, setErrorMsg] = useState('')
   const [agents, setAgents] = useState<{ id: string; name: string }[]>([])
   const [assignMap, setAssignMap] = useState<Record<string, string>>({})
+  const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null)
+  const [testingType, setTestingType] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<Record<string, 'ok' | 'fail' | null>>({})
 
   const fetchIntegrations = () => {
     const token = getToken()
@@ -100,8 +125,9 @@ export default function Integrations() {
       .catch(() => {})
   }
 
+  useEffect(() => { fetchIntegrations(); fetchAgents() }, [])
+
   useEffect(() => {
-    // Pre-populate assignMap from loaded records
     const map: Record<string, string> = {}
     records.forEach(r => { if (r.agent_id) map[r.type] = r.agent_id })
     setAssignMap(map)
@@ -116,6 +142,32 @@ export default function Integrations() {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ agentId: agentId || null }),
     }).catch(() => {})
+  }
+
+  const handleTestConnection = async (type: string) => {
+    setTestingType(type)
+    const token = getToken()
+    try {
+      const r = await fetch(`/api/integrations/${type}/test`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      })
+      setTestResult(prev => ({ ...prev, [type]: r.ok ? 'ok' : 'fail' }))
+    } catch {
+      setTestResult(prev => ({ ...prev, [type]: 'fail' }))
+    } finally {
+      setTestingType(null)
+      setTimeout(() => setTestResult(prev => ({ ...prev, [type]: null })), 3000)
+    }
+  }
+
+  const copyWebhookUrl = (type: string) => {
+    const meta = INTEGRATION_META[type]
+    const url = `${getBaseUrl()}${meta.webhookPath}`
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedWebhook(type)
+      setTimeout(() => setCopiedWebhook(null), 2000)
+    })
   }
 
   const openModal = (type: string) => {
@@ -175,25 +227,59 @@ export default function Integrations() {
           {types.map(type => {
             const m = INTEGRATION_META[type]
             const rec = getRecord(type)
+            const webhookUrl = `${getBaseUrl()}${m.webhookPath}`
+            const tr = testResult[type]
+
             return (
-              <div key={type} className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-5 flex flex-col gap-4 hover:border-violet-500/20 transition-colors">
+              <div key={type} className={`bg-[#111118] border rounded-xl p-5 flex flex-col gap-4 transition-colors ${
+                rec?.error ? 'border-red-500/30' : rec?.connected ? 'border-green-500/20 hover:border-green-500/30' : 'border-[#1e1e2e] hover:border-violet-500/20'
+              }`}>
+                {/* Header */}
                 <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0 text-lg">
+                  <div className={`w-10 h-10 rounded-xl border flex items-center justify-center flex-shrink-0 text-lg ${
+                    rec?.error ? 'bg-red-500/10 border-red-500/20' : rec?.connected ? 'bg-green-500/10 border-green-500/20' : 'bg-violet-500/10 border-violet-500/20'
+                  }`}>
                     {m.icon}
                   </div>
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <h3 className="font-bold text-white text-sm">{m.name}</h3>
-                    {rec?.connected ? (
-                      <span className="flex items-center gap-1 text-xs bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-0.5 rounded-full w-fit">
+                    {rec?.error ? (
+                      <span className="flex items-center gap-1 text-xs bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-0.5 rounded-full w-fit mt-0.5">
+                        <AlertCircle size={10} /> Error — reconnect needed
+                      </span>
+                    ) : rec?.connected ? (
+                      <span className="flex items-center gap-1 text-xs bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-0.5 rounded-full w-fit mt-0.5">
                         <Check size={10} /> Connected{rec.bot_info ? ` · @${rec.bot_info}` : ''}
                       </span>
                     ) : (
-                      <span className="text-xs text-slate-600">Not Connected</span>
+                      <span className="text-xs text-slate-600 mt-0.5 block">Not Connected</span>
+                    )}
+                    {rec?.last_activity && (
+                      <span className="flex items-center gap-1 text-xs text-slate-600 mt-1">
+                        <Clock size={9} /> Last active {timeAgo(rec.last_activity)}
+                      </span>
                     )}
                   </div>
                 </div>
+
                 <p className="text-xs text-slate-500 leading-relaxed flex-1">{m.description}</p>
 
+                {/* Webhook URL */}
+                {rec?.connected && (
+                  <div className="bg-white/3 border border-[#1e1e2e] rounded-xl p-3 flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-slate-500 mb-0.5 font-semibold">Webhook URL</p>
+                      <p className="text-xs text-slate-400 font-mono truncate">{webhookUrl}</p>
+                    </div>
+                    <button onClick={() => copyWebhookUrl(type)}
+                      className={`flex-shrink-0 p-1.5 rounded-lg border transition-colors ${copiedWebhook === type ? 'bg-green-500/10 border-green-500/20 text-green-400' : 'bg-white/5 border-[#1e1e2e] text-slate-500 hover:text-slate-300'}`}
+                      title="Copy webhook URL">
+                      {copiedWebhook === type ? <Check size={13} /> : <Copy size={13} />}
+                    </button>
+                  </div>
+                )}
+
+                {/* Assign to Agent */}
                 {rec?.connected && agents.length > 0 && (
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">Assign to Agent</label>
@@ -208,12 +294,34 @@ export default function Integrations() {
                   </div>
                 )}
 
+                {/* Actions */}
                 <div className="flex gap-2">
                   {rec?.connected ? (
-                    <button onClick={() => handleDisconnect(type)}
-                      className="flex-1 py-2 rounded-xl text-xs font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
-                      Disconnect
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleTestConnection(type)}
+                        disabled={testingType === type}
+                        className={`flex-1 py-2 rounded-xl text-xs font-semibold border transition-colors flex items-center justify-center gap-1.5 ${
+                          tr === 'ok' ? 'border-green-500/30 text-green-400 bg-green-500/10' :
+                          tr === 'fail' ? 'border-red-500/30 text-red-400 bg-red-500/10' :
+                          'border-violet-500/20 text-violet-400 hover:bg-violet-500/10'
+                        }`}
+                      >
+                        {testingType === type ? (
+                          <><Loader2 size={11} className="animate-spin" /> Testing...</>
+                        ) : tr === 'ok' ? (
+                          <><Check size={11} /> Test OK</>
+                        ) : tr === 'fail' ? (
+                          <><AlertCircle size={11} /> Test Failed</>
+                        ) : (
+                          <><Zap size={11} /> Test</>
+                        )}
+                      </button>
+                      <button onClick={() => handleDisconnect(type)}
+                        className="flex-1 py-2 rounded-xl text-xs font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
+                        Disconnect
+                      </button>
+                    </>
                   ) : (
                     <button onClick={() => openModal(type)} className="flex-1 py-2 rounded-xl text-xs font-semibold gradient-btn">
                       Connect
@@ -239,9 +347,19 @@ export default function Integrations() {
 
             {step === 'instructions' && (
               <>
-                <div className="bg-white/5 border border-[#1e1e2e] rounded-xl p-4 mb-5">
+                <div className="bg-white/5 border border-[#1e1e2e] rounded-xl p-4 mb-4">
                   <p className="text-xs text-slate-300 font-semibold mb-2 flex items-center gap-1.5"><ExternalLink size={12} /> Setup Instructions</p>
                   <pre className="text-xs text-slate-400 whitespace-pre-wrap leading-relaxed font-sans">{meta.instructions}</pre>
+                </div>
+                {/* Webhook URL preview in modal */}
+                <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 mb-4 flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-violet-400 font-semibold mb-0.5">Your Webhook URL</p>
+                    <p className="text-xs text-slate-400 font-mono truncate">{getBaseUrl()}{meta.webhookPath}</p>
+                  </div>
+                  <button onClick={() => copyWebhookUrl(activeType!)} className="flex-shrink-0 p-1.5 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-400 hover:bg-violet-500/20 transition-colors">
+                    {copiedWebhook === activeType ? <Check size={12} /> : <Copy size={12} />}
+                  </button>
                 </div>
                 <button onClick={() => setStep('form')} className="w-full py-2.5 rounded-xl gradient-btn text-sm font-semibold">
                   Next: Enter Credentials →
@@ -313,4 +431,3 @@ export default function Integrations() {
     </DashboardLayout>
   )
 }
-

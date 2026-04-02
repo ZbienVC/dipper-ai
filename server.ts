@@ -650,15 +650,20 @@ async function executeAutomation(automation: Automation): Promise<AutomationRun>
       const resp = await sendTelegramMessage(botToken, recipient, outputText);
       if (!resp.ok) throw new Error(`Telegram API error: ${resp.status}`);
     } else if (channel === 'sms') {
-      const integration = db.data.integrations.find(i => i.user_id === automation.user_id && i.type === 'twilio' && i.connected);
-      if (!integration) throw new Error('No Twilio integration connected');
+      const integration = db.data.integrations.find(i => i.user_id === automation.user_id && i.type === 'sms' && i.connected);
+      if (!integration) throw new Error('No SMS/Twilio integration connected');
       const creds = decodeCredentials(integration.credentials);
+      // Support both legacy key names and current names
+      const acctSid = creds.accountSid || creds.account_sid;
+      const authTok = creds.authToken || creds.auth_token;
+      const fromNum = creds.phoneNumber || creds.from_number;
+      if (!acctSid || !authTok || !fromNum) throw new Error('Twilio credentials incomplete');
       const body = new URLSearchParams({
-        From: creds.from_number || '', To: recipient || '', Body: outputText,
+        From: fromNum, To: recipient || '', Body: outputText,
       });
-      const twilioResp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${creds.account_sid}/Messages.json`, {
+      const twilioResp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${acctSid}/Messages.json`, {
         method: 'POST',
-        headers: { 'Authorization': 'Basic ' + Buffer.from(`${creds.account_sid}:${creds.auth_token}`).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 'Authorization': 'Basic ' + Buffer.from(`${acctSid}:${authTok}`).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString(),
       });
       if (!twilioResp.ok) throw new Error(`Twilio error: ${twilioResp.status}`);
@@ -1058,6 +1063,48 @@ async function startServer() {
     res.json({ agents: agents.map(a => ({ id: a.id, name: a.name, emoji: a.emoji, total_messages: a.total_messages })), totalMessages });
   });
 
+  // Per-agent detailed analytics with time-series (last 30 days)
+  app.get('/api/analytics/agent/:id', auth, (req: any, res) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+
+    const logs = db.data.activity_logs.filter(l => l.agent_id === agent.id);
+    const messageLogs = logs.filter(l => l.event_type === 'message_sent');
+
+    // Build 30-day time series
+    const days: Record<string, { date: string; messages: number; errors: number; tokens: number }> = {};
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000).toISOString().split('T')[0];
+      days[d] = { date: d, messages: 0, errors: 0, tokens: 0 };
+    }
+    for (const log of logs) {
+      const d = log.created_at.split('T')[0];
+      if (days[d]) {
+        if (log.event_type === 'message_sent') days[d].messages++;
+        if (log.status === 'error') days[d].errors++;
+        if (log.tokens_used) days[d].tokens += log.tokens_used;
+      }
+    }
+
+    const channelBreakdown: Record<string, number> = {};
+    for (const log of messageLogs) channelBreakdown[log.channel] = (channelBreakdown[log.channel] || 0) + 1;
+
+    const withLatency = logs.filter(l => l.latency_ms != null && l.latency_ms > 0);
+    const avgLatency = withLatency.length > 0 ? Math.round(withLatency.reduce((s, l) => s + (l.latency_ms || 0), 0) / withLatency.length) : 0;
+    const totalTokens = logs.reduce((s, l) => s + (l.tokens_used || 0), 0);
+    const memories = (db.data.user_memories || []).filter(m => m.agent_id === agent.id);
+
+    res.json({
+      agent: { id: agent.id, name: agent.name, emoji: agent.emoji, model: agent.model, provider: agent.provider, total_messages: agent.total_messages },
+      timeSeries: Object.values(days),
+      channelBreakdown,
+      avgLatency,
+      totalTokens,
+      uniqueUsers: memories.length,
+      totalLogs: logs.length,
+    });
+  });
+
   app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
@@ -1400,8 +1447,30 @@ async function startServer() {
       const tgBasePrompt = tgKnowledgeContext ? `${tgKnowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt;
       const systemPromptWithMemory = memoryContext ? `${memoryContext}\n\n${tgBasePrompt}` : tgBasePrompt;
 
-      const history = [{ role: 'user', content: text }];
-      const { text: reply } = await callAI(provider, effectiveModel, systemPromptWithMemory, history);
+      // Find or create conversation for this Telegram chat to maintain history
+      const tgChatKey = `tg_${chatId}`;
+      let tgConv = db.data.conversations.find(c => c.agent_id === agent.id && c.channel === 'telegram' && (c as any).external_id === tgChatKey);
+      if (!tgConv) {
+        const newConv = { id: randomUUID(), agent_id: agent.id, user_id: undefined as any, channel: 'telegram', message_count: 0, created_at: new Date().toISOString(), external_id: tgChatKey } as any;
+        db.data.conversations.push(newConv);
+        tgConv = newConv;
+        save();
+      }
+
+      // Load last 10 messages for this conversation as context
+      const tgHistory = db.data.messages
+        .filter(m => m.conversation_id === tgConv!.id)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))
+        .slice(-10)
+        .map(m => ({ role: m.role, content: m.content }));
+      tgHistory.push({ role: 'user', content: text });
+
+      const { text: reply } = await callAI(provider, effectiveModel, systemPromptWithMemory, tgHistory);
+
+      // Store messages in conversation
+      db.data.messages.push({ id: randomUUID(), conversation_id: tgConv.id, role: 'user', content: text, created_at: new Date().toISOString() });
+      db.data.messages.push({ id: randomUUID(), conversation_id: tgConv.id, role: 'assistant', content: reply, model_used: effectiveModel, created_at: new Date().toISOString() });
+      (tgConv as any).message_count = ((tgConv as any).message_count || 0) + 2;
 
       // Handle delay if configured
       if (agent.response_delay_ms && agent.response_delay_ms > 0) {
@@ -1412,7 +1481,7 @@ async function startServer() {
       agent.total_messages++;
       save();
       // Async memory extraction
-      extractAndUpdateMemory(agent.id, telegramUserId, 'telegram', [...history, { role: 'assistant', content: reply }], agent.system_prompt).catch(() => {});
+      extractAndUpdateMemory(agent.id, telegramUserId, 'telegram', [...tgHistory, { role: 'assistant', content: reply }], agent.system_prompt).catch(() => {});
       logActivity({ user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'telegram', summary: 'Replied to Telegram message', details: reply.slice(0, 200), model_used: effectiveModel, status: 'success' });
     } catch (e) { console.error('[telegram webhook error]', e); }
   });
@@ -1437,7 +1506,23 @@ async function startServer() {
       const agent = db.data.agents.find(a => a.id === agentId && a.is_active);
       if (!agent) return;
 
-      const history = [{ role: 'user', content: Body }];
+      // Find or create conversation for this SMS number to maintain history
+      let smsConv = db.data.conversations.find(c => c.agent_id === agent.id && c.channel === 'sms' && (c as any).external_id === From);
+      if (!smsConv) {
+        const newConv = { id: randomUUID(), agent_id: agent.id, user_id: undefined as any, channel: 'sms', message_count: 0, created_at: new Date().toISOString(), external_id: From } as any;
+        db.data.conversations.push(newConv);
+        smsConv = newConv;
+        save();
+      }
+
+      // Load last 10 messages for context
+      const smsConvHistory = db.data.messages
+        .filter(m => m.conversation_id === smsConv!.id)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))
+        .slice(-10)
+        .map(m => ({ role: m.role, content: m.content }));
+      smsConvHistory.push({ role: 'user', content: Body });
+      const history = smsConvHistory;
       const smsMemoryContext = buildMemoryContext(agent.id, From, 'sms');
       const smsKnowledgeContext = buildKnowledgeContext(agent.id, Body);
       const smsBasePrompt = smsKnowledgeContext ? `${smsKnowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt;
@@ -1453,11 +1538,34 @@ async function startServer() {
         },
         body: new URLSearchParams({ From: phoneNumber, To: From, Body: reply }).toString(),
       });
+      // Store messages in conversation for future history
+      db.data.messages.push({ id: randomUUID(), conversation_id: smsConv!.id, role: 'user', content: Body, created_at: new Date().toISOString() });
+      db.data.messages.push({ id: randomUUID(), conversation_id: smsConv!.id, role: 'assistant', content: reply, model_used: agent.model, created_at: new Date().toISOString() });
+      (smsConv as any).message_count = ((smsConv as any).message_count || 0) + 2;
       agent.total_messages++;
       save();
       extractAndUpdateMemory(agent.id, From, 'sms', [...history, { role: 'assistant', content: reply }], agent.system_prompt).catch(() => {});
       logActivity({ user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'sms', summary: 'Replied to SMS message', details: reply.slice(0, 200), model_used: agent.model, status: 'success' });
     } catch (e) { console.error('[sms inbound error]', e); }
+  });
+
+  // ─── SMS opt-out/STOP handler ───────────────────────────────────────────
+  app.post('/api/webhooks/sms/optout', express.urlencoded({ extended: false }), async (req, res) => {
+    const OPT_OUT_KEYWORDS = ['STOP', 'UNSUBSCRIBE', 'QUIT', 'CANCEL', 'END'];
+    const OPT_IN_KEYWORDS = ['START', 'YES', 'UNSTOP'];
+    const { From, Body } = req.body;
+    if (!From || !Body) return res.type('text/xml').send('<Response></Response>');
+    const bodyUpper = Body.trim().toUpperCase();
+    if (OPT_OUT_KEYWORDS.includes(bodyUpper)) {
+      // Mark as opted out in a simple set
+      if (!db.data.activity_logs) db.data.activity_logs = [];
+      logActivity({ user_id: 'system', agent_id: 'system', agent_name: 'System', event_type: 'message_received', channel: 'sms', summary: `SMS opt-out from ${From}`, status: 'success' });
+      return res.type('text/xml').send(`<Response><Message>You've been unsubscribed. Reply START to resubscribe.</Message></Response>`);
+    }
+    if (OPT_IN_KEYWORDS.includes(bodyUpper)) {
+      return res.type('text/xml').send(`<Response><Message>You've been resubscribed. Reply STOP at any time to opt out.</Message></Response>`);
+    }
+    res.type('text/xml').send('<Response></Response>');
   });
 
   // ─── Activity ─────────────────────────────────────────────────────────────

@@ -17,9 +17,10 @@ const STARTER_TEMPLATES = [
 const COMM_STYLES = ['Professional', 'Casual & Friendly', 'Formal', 'Witty & Humorous', 'Empathetic', 'Direct & Concise']
 const TONES = ['Friendly', 'Professional', 'Assertive', 'Playful', 'Empathetic', 'Witty']
 const MODELS = [
-  { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', badge: 'Anthropic', desc: 'Fast, capable' },
-  { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', badge: 'Anthropic', desc: 'Superior reasoning' },
-  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', badge: 'Google', desc: 'Fast & cheap' },
+  { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', badge: 'Anthropic', desc: 'Fast & cheap', speed: '⚡ Fast', cost: '$' },
+  { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', badge: 'Anthropic', desc: 'Superior reasoning', speed: '🧠 Smart', cost: '$$' },
+  { id: 'gpt-4o', name: 'GPT-4o', badge: 'OpenAI', desc: 'Multimodal powerhouse', speed: '🚀 Powerful', cost: '$$$' },
+  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', badge: 'Google', desc: 'Long context, fast', speed: '⚡ Fast', cost: '$' },
 ]
 
 const INTEGRATIONS_LIST = [
@@ -40,9 +41,12 @@ interface WizardState {
   forbiddenWords: string
   tone: string
   creativity: number
+  maxResponseLength: number
+  responseFormat: string
   model: string
   provider: string
   uploadedFiles: string[]
+  knowledgeText: string
   knowledgeUrl: string
   commands: Array<{ name: string; desc: string }>
   enabledIntegrations: string[]
@@ -59,9 +63,12 @@ const defaultState: WizardState = {
   forbiddenWords: '',
   tone: 'Friendly',
   creativity: 65,
+  maxResponseLength: 300,
+  responseFormat: 'conversational',
   model: 'claude-3-5-haiku-20241022',
   provider: 'anthropic',
   uploadedFiles: [],
+  knowledgeText: '',
   knowledgeUrl: '',
   commands: [{ name: '/help', desc: 'Show available commands' }],
   enabledIntegrations: [],
@@ -254,8 +261,37 @@ export default function NewAgent() {
         </div>
       </div>
       <div>
+        <div className="flex justify-between items-center mb-2">
+          <label className="text-sm font-semibold text-slate-300">Max Response Length</label>
+          <span className="text-sm font-bold text-violet-400">{state.maxResponseLength} chars</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-600">Short</span>
+          <input type="range" min={50} max={2000} step={50} value={state.maxResponseLength} onChange={e => update({ maxResponseLength: Number(e.target.value) })} className="flex-1 accent-violet-500" />
+          <span className="text-xs text-slate-600">Long</span>
+        </div>
+      </div>
+      <div>
+        <label className="block text-sm font-semibold text-slate-300 mb-2">Response Format</label>
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { id: 'conversational', label: 'Conversational', desc: 'Natural chat style' },
+            { id: 'bullet_points', label: 'Bullet Points', desc: 'Lists and structure' },
+            { id: 'structured', label: 'Structured', desc: 'Formal with sections' },
+          ].map(f => (
+            <button key={f.id} onClick={() => update({ responseFormat: f.id })}
+              className={`p-3 rounded-xl border-2 text-left transition-all ${
+                state.responseFormat === f.id ? 'border-violet-500 bg-violet-500/10' : 'border-[#1e1e2e] bg-white/5 hover:border-violet-500/30'
+              }`}>
+              <p className="font-semibold text-white text-xs mb-0.5">{f.label}</p>
+              <p className="text-xs text-slate-500">{f.desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
         <label className="block text-sm font-semibold text-slate-300 mb-3">AI Model</label>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {MODELS.map(m => (
             <button key={m.id} onClick={() => update({ model: m.id, provider: m.badge.toLowerCase() })}
               className={`p-4 rounded-xl border-2 text-left transition-all ${
@@ -265,8 +301,12 @@ export default function NewAgent() {
                 <span className="font-bold text-white text-sm">{m.name}</span>
                 {state.model === m.id && <Check size={14} className="text-violet-400 flex-shrink-0" />}
               </div>
-              <span className="text-xs font-semibold text-slate-500 block mb-0.5">{m.badge}</span>
-              <span className="text-xs text-slate-500">{m.desc}</span>
+              <span className="text-xs font-semibold text-slate-500 block mb-1">{m.badge}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">{m.speed}</span>
+                <span className="text-xs text-violet-400 font-bold">{m.cost}</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">{m.desc}</p>
             </button>
           ))}
         </div>
