@@ -1,26 +1,38 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { ReactNode } from 'react'
+import { ReactNode, lazy, Suspense } from 'react'
+
+// Eagerly load auth/landing pages for fast initial render
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
-import Dashboard from './pages/Dashboard'
-import Agents from './pages/Agents'
-import NewAgent from './pages/NewAgent'
-import AgentDetail from './pages/AgentDetail'
-import Templates from './pages/Templates'
-import Integrations from './pages/Integrations'
-import Approvals from './pages/Approvals'
-import Analytics from './pages/Analytics'
-import ActivityPage from './pages/Activity'
-import Automations from './pages/Automations'
-import Settings from './pages/Settings'
-import Billing from './pages/Billing'
-import Admin from './pages/Admin'
-import EmbedChat from './pages/EmbedChat'
-import Teams from './pages/Teams'
-import TeamDetail from './pages/TeamDetail'
-import Leads from './pages/Leads'
-import Playground from './pages/Playground'
+
+// Lazy-load dashboard pages for code splitting
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Agents = lazy(() => import('./pages/Agents'))
+const NewAgent = lazy(() => import('./pages/NewAgent'))
+const AgentDetail = lazy(() => import('./pages/AgentDetail'))
+const Templates = lazy(() => import('./pages/Templates'))
+const Integrations = lazy(() => import('./pages/Integrations'))
+const Approvals = lazy(() => import('./pages/Approvals'))
+const Analytics = lazy(() => import('./pages/Analytics'))
+const ActivityPage = lazy(() => import('./pages/Activity'))
+const Automations = lazy(() => import('./pages/Automations'))
+const Settings = lazy(() => import('./pages/Settings'))
+const Billing = lazy(() => import('./pages/Billing'))
+const Admin = lazy(() => import('./pages/Admin'))
+const EmbedChat = lazy(() => import('./pages/EmbedChat'))
+const Teams = lazy(() => import('./pages/Teams'))
+const TeamDetail = lazy(() => import('./pages/TeamDetail'))
+const Leads = lazy(() => import('./pages/Leads'))
+const Playground = lazy(() => import('./pages/Playground'))
+
+function PageLoader() {
+  return (
+    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
+      <div className="w-6 h-6 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin" />
+    </div>
+  )
+}
 
 function PrivateRoute({ children }: { children: ReactNode }) {
   try {
@@ -37,36 +49,38 @@ function PrivateRoute({ children }: { children: ReactNode }) {
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<Signup />} />
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
 
-        {/* Protected dashboard routes */}
-        <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
-        <Route path="/dashboard/agents" element={<PrivateRoute><Agents /></PrivateRoute>} />
-        <Route path="/dashboard/agents/new" element={<PrivateRoute><NewAgent /></PrivateRoute>} />
-        <Route path="/dashboard/agents/:id" element={<PrivateRoute><AgentDetail /></PrivateRoute>} />
-        <Route path="/dashboard/templates" element={<PrivateRoute><Templates /></PrivateRoute>} />
-        <Route path="/dashboard/integrations" element={<PrivateRoute><Integrations /></PrivateRoute>} />
-        <Route path="/dashboard/approvals" element={<PrivateRoute><Approvals /></PrivateRoute>} />
-        <Route path="/dashboard/analytics" element={<PrivateRoute><Analytics /></PrivateRoute>} />
-        <Route path="/dashboard/activity" element={<PrivateRoute><ActivityPage /></PrivateRoute>} />
-        <Route path="/dashboard/automations" element={<PrivateRoute><Automations /></PrivateRoute>} />
-        <Route path="/dashboard/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
-        <Route path="/dashboard/billing" element={<PrivateRoute><Billing /></PrivateRoute>} />
-        <Route path="/dashboard/teams" element={<PrivateRoute><Teams /></PrivateRoute>} />
-        <Route path="/dashboard/teams/:id" element={<PrivateRoute><TeamDetail /></PrivateRoute>} />
-        <Route path="/dashboard/leads" element={<PrivateRoute><Leads /></PrivateRoute>} />
-        <Route path="/dashboard/playground" element={<PrivateRoute><Playground /></PrivateRoute>} />
+          {/* Protected dashboard routes */}
+          <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+          <Route path="/dashboard/agents" element={<PrivateRoute><Agents /></PrivateRoute>} />
+          <Route path="/dashboard/agents/new" element={<PrivateRoute><NewAgent /></PrivateRoute>} />
+          <Route path="/dashboard/agents/:id" element={<PrivateRoute><AgentDetail /></PrivateRoute>} />
+          <Route path="/dashboard/templates" element={<PrivateRoute><Templates /></PrivateRoute>} />
+          <Route path="/dashboard/integrations" element={<PrivateRoute><Integrations /></PrivateRoute>} />
+          <Route path="/dashboard/approvals" element={<PrivateRoute><Approvals /></PrivateRoute>} />
+          <Route path="/dashboard/analytics" element={<PrivateRoute><Analytics /></PrivateRoute>} />
+          <Route path="/dashboard/activity" element={<PrivateRoute><ActivityPage /></PrivateRoute>} />
+          <Route path="/dashboard/automations" element={<PrivateRoute><Automations /></PrivateRoute>} />
+          <Route path="/dashboard/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
+          <Route path="/dashboard/billing" element={<PrivateRoute><Billing /></PrivateRoute>} />
+          <Route path="/dashboard/teams" element={<PrivateRoute><Teams /></PrivateRoute>} />
+          <Route path="/dashboard/teams/:id" element={<PrivateRoute><TeamDetail /></PrivateRoute>} />
+          <Route path="/dashboard/leads" element={<PrivateRoute><Leads /></PrivateRoute>} />
+          <Route path="/dashboard/playground" element={<PrivateRoute><Playground /></PrivateRoute>} />
 
-        <Route path="/admin" element={<Admin />} />
+          <Route path="/admin" element={<Admin />} />
 
-        {/* Public embed chat — no auth required */}
-        <Route path="/embed/:token" element={<EmbedChat />} />
+          {/* Public embed chat — no auth required */}
+          <Route path="/embed/:token" element={<EmbedChat />} />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   )
 }

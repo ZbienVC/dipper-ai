@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
 import { MessageSquare, TrendingUp, Clock, Activity, Smile, Zap } from 'lucide-react'
 
@@ -179,7 +179,7 @@ export default function Analytics() {
   const [range, setRange] = useState<Range>('Last 30 days')
 
   const days = range === 'Last 7 days' ? 7 : range === 'Last 30 days' ? 30 : 90
-  const dailyData = generateDailyMessages(days)
+  const dailyData = useMemo(() => generateDailyMessages(days), [days])
   const totalMessages = dailyData.reduce((s, d) => s + d.value, 0)
   const avgPerDay = Math.round(totalMessages / days)
   const satisfaction = 94.2

@@ -368,7 +368,8 @@ export default function Landing() {
             <h2 className="text-4xl font-extrabold text-white mb-4">How DipperAI compares</h2>
             <p className="text-lg text-slate-500">More channels, more models, more control — at a fraction of the cost.</p>
           </div>
-          <div className="bg-[#111118] border border-[#1e1e2e] rounded-2xl overflow-hidden">
+          <div className="overflow-x-auto">
+          <div className="bg-[#111118] border border-[#1e1e2e] rounded-2xl overflow-hidden min-w-[520px]">
             <div className="grid grid-cols-4 bg-white/5 border-b border-[#1e1e2e]">
               <div className="p-4 col-span-1" />
               <div className="p-4 text-center">
@@ -398,6 +399,7 @@ export default function Landing() {
                 </div>
               </div>
             ))}
+          </div>
           </div>
         </div>
       </section>

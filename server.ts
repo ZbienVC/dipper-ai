@@ -1254,7 +1254,7 @@ async function startServer() {
   app.get('/api/agents/:id', auth, (req: any, res) => {
     const agent = findAgent(req.params.id, req.userId);
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
-    res.json(agent);
+    res.json(enrichAgent(agent));
   });
 
   app.put('/api/agents/:id', auth, (req: any, res) => {
@@ -1327,7 +1327,7 @@ async function startServer() {
     try {
       const memoryContext = buildMemoryContext(agent.id, req.userId, 'web');
       const knowledgeContext = buildKnowledgeContext(agent.id, message);
-      const basePrompt = knowledgeContext ? `${knowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const basePrompt = buildAgentSystemPrompt(agent, knowledgeContext ? `${knowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt);
       const systemPromptWithMemory = memoryContext ? `${memoryContext}\n\n${basePrompt}` : basePrompt;
       const { text: content, tokensUsed } = await callAI(activeProvider, effectiveModel, systemPromptWithMemory, history, plan.maxTokens);
       const latency_ms = Date.now() - startTime;
@@ -1801,7 +1801,7 @@ async function startServer() {
       const telegramUserId = String(msg.from?.id || chatId);
       const memoryContext = buildMemoryContext(agent.id, telegramUserId, 'telegram');
       const tgKnowledgeContext = buildKnowledgeContext(agent.id, text);
-      const tgBasePrompt = tgKnowledgeContext ? `${tgKnowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const tgBasePrompt = buildAgentSystemPrompt(agent, tgKnowledgeContext ? `${tgKnowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt);
       const systemPromptWithMemory = memoryContext ? `${memoryContext}\n\n${tgBasePrompt}` : tgBasePrompt;
 
       // Find or create conversation for this Telegram chat to maintain history
@@ -1885,7 +1885,7 @@ async function startServer() {
       const history = smsConvHistory;
       const smsMemoryContext = buildMemoryContext(agent.id, From, 'sms');
       const smsKnowledgeContext = buildKnowledgeContext(agent.id, Body);
-      const smsBasePrompt = smsKnowledgeContext ? `${smsKnowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const smsBasePrompt = buildAgentSystemPrompt(agent, smsKnowledgeContext ? `${smsKnowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt);
       const smsSystemPrompt = smsMemoryContext ? `${smsMemoryContext}\n\n${smsBasePrompt}` : smsBasePrompt;
       const { text: reply } = await callAI(agent.provider, agent.model, smsSystemPrompt, history);
 
@@ -2044,7 +2044,7 @@ async function startServer() {
       const embedUserId = `embed_${conversationId || convId}`;
       const embedMemoryContext = buildMemoryContext(agent.id, embedUserId, 'web');
       const embedKnowledgeContext = buildKnowledgeContext(agent.id, message);
-      const embedBasePrompt = embedKnowledgeContext ? `${embedKnowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt;
+      const embedBasePrompt = buildAgentSystemPrompt(agent, embedKnowledgeContext ? `${embedKnowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt);
       const embedSystemPrompt = embedMemoryContext ? `${embedMemoryContext}\n\n${embedBasePrompt}` : embedBasePrompt;
       const { text: content, tokensUsed } = await callAI(agent.provider, agent.model, embedSystemPrompt, history, 1024);
       const latency_ms = Date.now() - startTime;

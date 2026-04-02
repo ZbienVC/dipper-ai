@@ -1,4 +1,5 @@
 import { ReactNode, useState, useRef, useEffect } from 'react'
+import React from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Bot, LayoutTemplate, Plug, CheckSquare,
@@ -6,7 +7,7 @@ import {
   LogOut, ChevronDown, Menu, X, User, Zap, Activity, Users2, Users, FlaskConical
 } from 'lucide-react'
 
-const navItems = [
+const navItems: { icon: React.ElementType; label: string; path: string; badge?: string | number }[] = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
   { icon: Bot, label: 'My Agents', path: '/dashboard/agents' },
   { icon: Users2, label: 'Teams', path: '/dashboard/teams' },
