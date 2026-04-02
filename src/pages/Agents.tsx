@@ -84,6 +84,8 @@ export default function Agents() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false)
+  const [agentLimit, setAgentLimit] = useState<number | null>(null)
 
   const getToken = () => {
     try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
@@ -105,6 +107,10 @@ export default function Agents() {
           always_on: !!a.always_on,
         })))
       })
+      .catch(() => {})
+    fetch('/api/billing/usage', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.usage?.agents) setAgentLimit(data.usage.agents.limit) })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -141,6 +147,7 @@ export default function Agents() {
   const activeCount = agents.filter(a => a.status === 'active').length
 
   return (
+    <>
     <DashboardLayout title="My Agents">
       <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
         <div>
@@ -149,7 +156,13 @@ export default function Agents() {
             {activeCount} active · {agents.length} total
           </p>
         </div>
-        <button onClick={() => navigate('/dashboard/agents/new')}
+        <button onClick={() => {
+            if (agentLimit !== null && agentLimit !== 999 && agents.length >= agentLimit) {
+              setShowUpgradeModal(true)
+            } else {
+              navigate('/dashboard/agents/new')
+            }
+          }}
           className="gradient-btn flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm">
           <Plus size={15} /> New Agent
         </button>
@@ -360,5 +373,27 @@ export default function Agents() {
         </div>
       )}
     </DashboardLayout>
+
+    {showUpgradeModal && (
+      <UpgradeModal
+        feature="Creating more agents"
+        onClose={() => setShowUpgradeModal(false)}
+        onUpgrade={(plan) => {
+          setShowUpgradeModal(false)
+          const token = getToken()
+          if (!token) return
+          fetch('/api/billing/checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ plan }),
+          }).then(r => r.json()).then(d => {
+            if (d.url) window.location.href = d.url
+            else if (d.demo) alert('Billing not configured yet. Set up Stripe to enable upgrades.')
+            else alert(d.error || 'Checkout failed')
+          }).catch(() => alert('Connection error'))
+        }}
+      />
+    )}
+    </>
   )
 }
