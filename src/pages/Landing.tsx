@@ -1,30 +1,30 @@
 import { Link } from 'react-router-dom'
 import {
   ArrowRight, Zap, Bot, Shield, Globe, Check, MessageSquare,
-  BarChart2, Plug, Users, TrendingUp, ChevronRight, Star
+  BarChart2, Plug, Users, TrendingUp, ChevronRight, Star, X
 } from 'lucide-react'
 
 const features = [
   {
     icon: Bot,
-    title: 'AI Agents That Work For You',
-    desc: 'Deploy purpose-built AI agents that handle conversations across every channel. From customer support to sales outreach — fully automated.',
+    title: 'No-Code Agent Builder',
+    desc: 'Build powerful AI agents in minutes — no engineers needed. Pick a template, define personality, add your knowledge base, and launch.',
     color: 'text-violet-400',
     bg: 'bg-violet-500/10',
     border: 'border-violet-500/20',
   },
   {
     icon: Plug,
-    title: 'Connect Every Channel',
-    desc: 'SMS, Telegram, Discord, X/Twitter, and WhatsApp. One agent, every platform. Meet your audience wherever they are.',
+    title: 'True Multi-Channel',
+    desc: 'SMS, Telegram, Discord, X/Twitter, and WhatsApp. One agent, every platform. Your customers get consistent, instant replies everywhere.',
     color: 'text-blue-400',
     bg: 'bg-blue-500/10',
     border: 'border-blue-500/20',
   },
   {
-    icon: BarChart2,
-    title: 'Real-Time Analytics',
-    desc: 'Track message volume, response rates, and agent performance in a unified dashboard. Know what\'s working instantly.',
+    icon: MessageSquare,
+    title: 'Your Choice of AI Model',
+    desc: 'Claude 3.5 Sonnet, GPT-4o, Gemini Flash — pick the best model for your use case. Balance speed, cost, and intelligence.',
     color: 'text-teal-400',
     bg: 'bg-teal-500/10',
     border: 'border-teal-500/20',
@@ -37,6 +37,44 @@ const features = [
     bg: 'bg-amber-500/10',
     border: 'border-amber-500/20',
   },
+  {
+    icon: BarChart2,
+    title: 'Real-Time Analytics',
+    desc: 'Track message volume, response rates, and agent performance. Know what\'s working and iterate fast.',
+    color: 'text-pink-400',
+    bg: 'bg-pink-500/10',
+    border: 'border-pink-500/20',
+  },
+  {
+    icon: TrendingUp,
+    title: 'Built-In CRM & Leads',
+    desc: 'Automatically capture leads from conversations. Every message that comes in becomes a lead in your pipeline.',
+    color: 'text-emerald-400',
+    bg: 'bg-emerald-500/10',
+    border: 'border-emerald-500/20',
+  },
+]
+
+const useCases = [
+  { emoji: '🎧', title: 'Customer Support', desc: 'Handle tickets 24/7 with instant, accurate responses. Escalate to humans only when needed.' },
+  { emoji: '🚀', title: 'Lead Generation', desc: 'Qualify inbound leads automatically. Capture contact info and move prospects down the funnel.' },
+  { emoji: '📅', title: 'Appointment Booking', desc: 'Let customers schedule, reschedule, and confirm appointments via SMS or Telegram — no staff needed.' },
+  { emoji: '❓', title: 'FAQ Bot', desc: 'Answer your most common questions instantly. Upload your docs, and your agent knows everything.' },
+  { emoji: '💼', title: 'Sales Assistant', desc: 'Follow up on leads, send proposals, and close deals — your AI runs the playbook automatically.' },
+  { emoji: '🌐', title: 'Community Manager', desc: 'Keep Discord and Telegram communities engaged, moderated, and growing around the clock.' },
+]
+
+const comparisonRows = [
+  { feature: 'No-code agent builder', dipper: true, botpress: true, manychat: true },
+  { feature: 'SMS / Twilio support', dipper: true, botpress: false, manychat: true },
+  { feature: 'Telegram bots', dipper: true, botpress: true, manychat: true },
+  { feature: 'Discord integration', dipper: true, botpress: false, manychat: false },
+  { feature: 'X / Twitter support', dipper: true, botpress: false, manychat: false },
+  { feature: 'Choose your AI model', dipper: true, botpress: false, manychat: false },
+  { feature: 'Built-in CRM / leads', dipper: true, botpress: false, manychat: true },
+  { feature: 'Human-in-the-loop approvals', dipper: true, botpress: true, manychat: false },
+  { feature: 'Agent Teams (multi-agent)', dipper: true, botpress: true, manychat: false },
+  { feature: 'Free tier available', dipper: true, botpress: true, manychat: true },
 ]
 
 const steps = [
@@ -117,20 +155,19 @@ export default function Landing() {
       <section className="pt-24 pb-20 px-6 relative overflow-hidden">
         {/* Background glow */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[400px] opacity-20" style={{ background: 'radial-gradient(ellipse, #7c3aed 0%, transparent 70%)' }} />
-        
+
         <div className="max-w-5xl mx-auto text-center relative">
           <div className="inline-flex items-center gap-2 bg-violet-500/10 border border-violet-500/20 text-violet-300 text-xs font-semibold px-4 py-2 rounded-full mb-8">
             <Zap size={12} />
-            No coding required — launch in minutes
+            No coding required - launch in minutes
           </div>
           <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight mb-6 leading-[1.05]">
             <span className="gradient-text">Build AI Agents</span>
             <br />
-            <span className="text-white">in Minutes</span>
+            <span className="text-white">That Reply Automatically</span>
           </h1>
           <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-            Deploy AI agents that handle SMS, Telegram, Discord, and social conversations automatically.
-            No engineers needed.
+            Deploy AI agents that reply to your customers on <strong className="text-white">SMS, Telegram, Discord, and Twitter</strong> — automatically. No engineers needed.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
             <Link to="/signup" className="gradient-btn font-bold px-8 py-3.5 rounded-xl text-base flex items-center gap-2">
@@ -142,7 +179,7 @@ export default function Landing() {
           </div>
           <p className="text-xs text-slate-600 mt-5">Free forever · No credit card required</p>
 
-          {/* Hero visual — terminal */}
+          {/* Hero visual - terminal */}
           <div className="mt-16 relative max-w-2xl mx-auto">
             <div className="absolute inset-0 rounded-2xl opacity-30" style={{ background: 'radial-gradient(ellipse at center, #7c3aed 0%, transparent 70%)', filter: 'blur(40px)' }} />
             <div className="relative bg-[#111118] border border-[#1e1e2e] rounded-2xl p-6 shadow-2xl text-left">
@@ -224,7 +261,7 @@ export default function Landing() {
             <h2 className="text-4xl font-extrabold text-white mb-4">Everything you need to automate</h2>
             <p className="text-lg text-slate-500 max-w-2xl mx-auto">DipperAI gives you the tools to build, deploy, and scale AI agents across every channel your customers use.</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {features.map(f => (
               <div key={f.title} className={`bg-[#111118] border ${f.border} rounded-2xl p-7 hover:border-opacity-60 transition-colors`}>
                 <div className={`w-12 h-12 rounded-xl ${f.bg} border ${f.border} flex items-center justify-center mb-5`}>
@@ -293,7 +330,7 @@ export default function Landing() {
       <section className="py-20 px-6 bg-[#0d0d15] border-y border-[#1e1e2e]">
         <div className="max-w-4xl mx-auto text-center">
           <h2 className="text-3xl font-extrabold text-white mb-4">Connect every channel</h2>
-          <p className="text-slate-500 mb-10 text-sm">Meet your customers where they are — on every platform.</p>
+          <p className="text-slate-500 mb-10 text-sm">Meet your customers where they are - on every platform.</p>
           <div className="flex flex-wrap justify-center gap-3">
             {['SMS', 'Telegram', 'Discord', 'X / Twitter', 'WhatsApp'].map(channel => (
               <div key={channel} className="flex items-center gap-2.5 px-5 py-3 bg-[#111118] border border-[#1e1e2e] rounded-xl font-semibold text-sm text-slate-300 hover:border-violet-500/30 transition-colors">

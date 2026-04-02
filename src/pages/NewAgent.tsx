@@ -183,8 +183,39 @@ export default function NewAgent() {
   const renderStep2 = () => (
     <div className="space-y-5">
       <div>
-        <label className="block text-sm font-semibold text-slate-300 mb-2">Bio</label>
-        <textarea value={state.bio} onChange={e => update({ bio: e.target.value })} placeholder="A brief description of your agent's purpose..." rows={3} className={textareaClass} />
+        <label className="block text-sm font-semibold text-slate-300 mb-2">Bio / Description</label>
+        <textarea value={state.bio} onChange={e => update({ bio: e.target.value })} placeholder="A brief description of your agent's purpose..." rows={2} className={textareaClass} />
+      </div>
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="block text-sm font-semibold text-slate-300">System Prompt</label>
+          <span className="text-xs text-slate-600">{state.systemPrompt.length} chars</span>
+        </div>
+        <div className="mb-2">
+          <select
+            onChange={e => { const t = STARTER_TEMPLATES.find(x => x.name === e.target.value); if (t) update({ systemPrompt: t.systemPrompt }) }}
+            className="w-full px-3 py-2 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] text-slate-400 text-xs focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+            defaultValue=""
+          >
+            <option value="" disabled>Load a template prompt...</option>
+            {STARTER_TEMPLATES.filter(t => t.systemPrompt).map(t => (
+              <option key={t.name} value={t.name}>{t.name}</option>
+            ))}
+          </select>
+        </div>
+        <textarea
+          value={state.systemPrompt}
+          onChange={e => update({ systemPrompt: e.target.value })}
+          placeholder="You are a helpful assistant that specializes in..."
+          rows={5}
+          className={textareaClass}
+        />
+        {state.systemPrompt && (
+          <div className="mt-2 bg-violet-500/5 border border-violet-500/20 rounded-xl p-3">
+            <p className="text-xs text-violet-400 font-semibold mb-1.5">Preview</p>
+            <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">{state.systemPrompt.slice(0, 200)}{state.systemPrompt.length > 200 ? '...' : ''}</p>
+          </div>
+        )}
       </div>
       <div>
         <label className="block text-sm font-semibold text-slate-300 mb-2">Personality Traits</label>
@@ -316,8 +347,23 @@ export default function NewAgent() {
 
   const renderStep4 = () => (
     <div className="space-y-5">
+      {/* Paste text knowledge */}
+      <div>
+        <label className="block text-sm font-semibold text-slate-300 mb-1.5">Paste FAQ / Docs / Knowledge</label>
+        <p className="text-xs text-slate-500 mb-2">Paste product documentation, FAQs, or any content your agent should know. This is appended to the system prompt.</p>
+        <textarea
+          value={state.knowledgeText}
+          onChange={e => update({ knowledgeText: e.target.value })}
+          placeholder="Q: What are your hours?\nA: We're open Mon-Fri 9am-5pm EST..."
+          rows={6}
+          className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white placeholder-slate-600 text-sm resize-none transition-all"
+        />
+        <p className="text-xs text-slate-600 mt-1 text-right">{state.knowledgeText.length} characters</p>
+      </div>
+
+      {/* File upload */}
       <div
-        className={`border-2 border-dashed rounded-xl p-10 text-center transition-all cursor-pointer ${
+        className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${
           isDragging ? 'border-violet-500 bg-violet-500/10' : 'border-[#1e1e2e] hover:border-violet-500/30'
         }`}
         onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
@@ -336,7 +382,7 @@ export default function NewAgent() {
           input.click()
         }}
       >
-        <Upload size={28} className={`mx-auto mb-2 ${isDragging ? 'text-violet-400' : 'text-slate-600'}`} />
+        <Upload size={24} className={`mx-auto mb-2 ${isDragging ? 'text-violet-400' : 'text-slate-600'}`} />
         <p className="font-semibold text-slate-300 mb-1 text-sm">Drop files here or click to browse</p>
         <p className="text-xs text-slate-600">PDF, TXT, DOCX, CSV</p>
       </div>
@@ -356,13 +402,10 @@ export default function NewAgent() {
       <div>
         <label className="block text-sm font-semibold text-slate-300 mb-2">Or add a URL to scrape</label>
         <div className="flex gap-3 max-w-lg">
-          <input value={state.knowledgeUrl} onChange={e => update({ knowledgeUrl: e.target.value })} placeholder="https://yoursite.com/docs" className={inputClass} />
+          <input value={state.knowledgeUrl} onChange={e => update({ knowledgeUrl: e.target.value })} placeholder="https://yoursite.com/docs" className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white placeholder-slate-600 text-sm" />
           <button onClick={() => { if (state.knowledgeUrl) { update({ uploadedFiles: [...state.uploadedFiles, state.knowledgeUrl], knowledgeUrl: '' }) } }}
             className="gradient-btn px-4 py-2 rounded-xl font-semibold text-sm flex-shrink-0">Add</button>
         </div>
-      </div>
-      <div className="bg-violet-500/10 border border-violet-500/20 rounded-xl p-4 text-sm text-violet-300">
-        Upload your FAQ, product docs, or any text your agent should know about.
       </div>
     </div>
   )
