@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom'
+﻿import { Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
 import { Bot, MessageSquare, CheckSquare, Plug, Plus, LayoutTemplate, Zap, Activity, Circle, Edit3, ArrowRight, Send, Clock, Users2, Users } from 'lucide-react'
@@ -330,6 +330,79 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Active Agents Monitoring */}
+      {!loading && agents.length > 0 && (
+        <div className="mt-5 bg-[#111118] rounded-xl p-5 border border-[#1e1e2e]">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Bot size={15} className="text-violet-400" />
+              <h2 className="text-sm font-semibold text-white">Active Agents</h2>
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20">
+                {activeAgents.length} of {agents.length}
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              {/* Agent health indicator */}
+              <div className="flex items-center gap-1.5 text-xs">
+                <div className="w-2 h-2 rounded-full bg-green-400" />
+                <span className="text-green-400 font-semibold">All systems go</span>
+              </div>
+              <button
+                onClick={() => {
+                  const token = getToken()
+                  if (!token) return
+                  Promise.all(activeAgents.map(a =>
+                    fetch(`/api/agents/${a.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ isActive: false }) })
+                  )).then(() => navigate('/dashboard/agents'))
+                }}
+                className="text-xs text-red-400 hover:text-red-300 border border-red-500/20 hover:bg-red-500/10 px-2 py-1 rounded-lg transition-all font-semibold"
+              >
+                Pause All
+              </button>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {activeAgents.slice(0, 4).map((agent: any) => (
+              <div key={agent.id}
+                className="flex items-center gap-3 p-3.5 rounded-xl bg-white/3 border border-[#1e1e2e] hover:border-violet-500/30 hover:bg-violet-500/5 transition-all cursor-pointer"
+                onClick={() => navigate(`/dashboard/agents/${agent.id}`)}>
+                <div className="w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0 text-lg">
+                  {agent.emoji || '🤖'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="font-semibold text-white text-sm truncate">{agent.name}</span>
+                    <span className="flex items-center gap-1 text-xs font-bold text-green-400 flex-shrink-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block animate-pulse" /> Active
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 truncate">
+                    {agent.model ? agent.model.replace('claude-', 'Claude ').replace('gpt-', 'GPT-').replace('-', ' ') : 'AI'} · {(agent.messages_today || 0)} msgs today · {(agent.total_messages || 0).toLocaleString()} total
+                  </p>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-xs text-slate-500">
+                    {agent.last_active ? (() => {
+                      const diff = Date.now() - new Date(agent.last_active).getTime()
+                      const m = Math.floor(diff / 60000)
+                      if (m < 1) return 'Just now'
+                      if (m < 60) return `${m}m ago`
+                      return `${Math.floor(m / 60)}h ago`
+                    })() : 'Never'}
+                  </p>
+                </div>
+              </div>
+            ))}
+            {activeAgents.length > 4 && (
+              <button onClick={() => navigate('/dashboard/agents')}
+                className="w-full text-center text-xs text-violet-400 hover:text-violet-300 transition-colors py-2">
+                +{activeAgents.length - 4} more active agents →
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Pipeline Widget */}
       <div className="mt-5 bg-[#111118] rounded-xl p-5 border border-[#1e1e2e]">

@@ -31,6 +31,12 @@ type Agent = {
   deployed_telegram_token?: string; deployed_discord_webhook?: string;
   deployed_embed_enabled: boolean; created_at: string; updated_at: string;
   autonomous_mode?: boolean; response_delay_ms?: number;
+  always_on?: boolean;
+  // Phase 4: knowledge base + response config
+  knowledge_base?: string;
+  response_format?: string;
+  max_response_length?: number;
+  long_term_memory?: number;
 };
 type Message = { id: string; conversation_id: string; role: string; content: string; model_used?: string; created_at: string; };
 type Conversation = { id: string; agent_id: string; user_id?: string; channel: string; message_count: number; created_at: string; };
@@ -38,6 +44,11 @@ type Integration = {
   id: string; user_id: string; type: string;
   credentials: Record<string, string>;
   connected: boolean; bot_info?: string; agent_id?: string; created_at: string;
+  // Twitter/Reddit OAuth tokens
+  access_token?: string;
+  refresh_token?: string;
+  token_expiry?: number;
+  token_data?: string; // JSON blob for extra metadata
 };
 type ScheduledMessage = {
   id: string; agent_id: string; user_id: string;
@@ -195,6 +206,36 @@ type Lead = {
   updated_at: string;
 };
 
+// ═══ New Intelligence Types ══════════════════════════════════════════════════
+type AgentLongTermMemory = {
+  id: string;
+  agent_id: string;
+  user_identifier: string;
+  channel: string;
+  facts: string[];
+  preferences: string[];
+  summary: string;
+  interaction_count: number;
+  last_updated: number;
+  created_at: number;
+};
+
+type AgentMetrics = {
+  id: string;
+  agent_id: string;
+  date: string;
+  messages_sent: number;
+  avg_response_ms: number;
+  follow_up_count: number;
+  satisfaction_score: number;
+  tokens_used: number;
+};
+
+type SmsOptout = {
+  phone: string;
+  opted_out_at: number;
+};
+
 type DBSchema = {
   users: User[]; agents: Agent[]; conversations: Conversation[];
   messages: Message[]; integrations: Integration[];
@@ -208,6 +249,9 @@ type DBSchema = {
   team_tasks: TeamTask[];
   team_task_logs: TeamTaskLog[];
   leads: Lead[];
+  agent_long_term_memory: AgentLongTermMemory[];
+  agent_metrics: AgentMetrics[];
+  sms_optouts: SmsOptout[];
 };
 
 // ─── Plan Definitions ─────────────────────────────────────────────────────────
@@ -559,6 +603,242 @@ function buildKnowledgeContext(agentId: string, query: string): string {
   return `=== Relevant Knowledge ===\n${chunks.join('\n\n')}\n=== End Knowledge ===`;
 }
 
+// ═══ Agent Intelligence System ═══════════════════════════════════════════════
+
+// 2A: Long-Term Memory — persistent, never expires
+function getLongTermMemory(agentId: string, userIdentifier: string, channel: string): AgentLongTermMemory | undefined {
+  if (!db?.data?.agent_long_term_memory) return undefined;
+  return db.data.agent_long_term_memory.find(
+    m => m.agent_id === agentId && m.user_identifier === userIdentifier && m.channel === channel
+  );
+}
+
+async function updateLongTermMemory(
+  agentId: string,
+  userIdentifier: string,
+  channel: string,
+  conversationHistory: { role: string; content: string }[]
+): Promise<void> {
+  try {
+    if (!db?.data?.agent_long_term_memory) db.data.agent_long_term_memory = [];
+    const now = Date.now();
+    let mem = getLongTermMemory(agentId, userIdentifier, channel);
+    if (!mem) {
+      mem = {
+        id: randomUUID(), agent_id: agentId, user_identifier: userIdentifier, channel,
+        facts: [], preferences: [], summary: '',
+        interaction_count: 0, last_updated: now, created_at: now,
+      };
+      db.data.agent_long_term_memory.push(mem);
+    }
+    mem.interaction_count++;
+    mem.last_updated = now;
+
+    if (conversationHistory.length < 2) { save(); return; }
+
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const convoText = conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n');
+
+    const extractResp = await client.messages.create({
+      model: 'claude-haiku-4-5', max_tokens: 600,
+      system: 'You are a memory extractor. Return ONLY valid JSON, no extra text.',
+      messages: [{
+        role: 'user',
+        content: `Extract useful long-term facts and preferences from this conversation.
+Return JSON exactly like: {"facts": ["fact1", "fact2"], "preferences": ["pref1", "pref2"]}
+Facts: things the user has shared about themselves (name, job, location, context).
+Preferences: how the user likes to communicate or what they want from the agent.
+Be concise; 3-8 items max each. Only include genuinely useful info.
+
+Conversation:
+${convoText.slice(0, 4000)}`,
+      }],
+    });
+    const raw = (extractResp.content[0] as any).text as string;
+    const parsed = JSON.parse(raw.trim());
+
+    if (Array.isArray(parsed.facts)) {
+      const combined = [...mem.facts, ...parsed.facts];
+      mem.facts = [...new Set(combined)].slice(-30);
+    }
+    if (Array.isArray(parsed.preferences)) {
+      const combined = [...mem.preferences, ...parsed.preferences];
+      mem.preferences = [...new Set(combined)].slice(-15);
+    }
+
+    if (mem.interaction_count % 5 === 0) {
+      const sumResp = await client.messages.create({
+        model: 'claude-haiku-4-5', max_tokens: 200,
+        system: 'Summarize this conversation context in 2-3 sentences. Be concise and factual.',
+        messages: [{ role: 'user', content: convoText.slice(0, 5000) }],
+      });
+      mem.summary = (sumResp.content[0] as any).text as string;
+    }
+
+    save();
+  } catch { /* never block */ }
+}
+
+// 2F: Enhanced System Prompt Builder
+function buildEnhancedSystemPrompt(agent: Agent, userIdentifier: string, channel: string): string {
+  const basePrompt = agent.system_prompt || 'You are a helpful AI assistant.';
+
+  const ltm = getLongTermMemory(agent.id, userIdentifier, channel);
+  let memorySection = '';
+  if (ltm && (ltm.facts.length > 0 || ltm.preferences.length > 0 || ltm.summary)) {
+    const parts: string[] = ['\n## What I Know About This User'];
+    if (ltm.facts.length > 0) parts.push(ltm.facts.slice(-20).map(f => `- ${f}`).join('\n'));
+    if (ltm.preferences.length > 0) {
+      parts.push('\n## User Preferences');
+      parts.push(ltm.preferences.slice(-10).map(p => `- ${p}`).join('\n'));
+    }
+    if (ltm.summary) {
+      parts.push('\n## Conversation History Summary');
+      parts.push(ltm.summary);
+    }
+    memorySection = parts.join('\n');
+  }
+
+  const channelCtx: Record<string, string> = {
+    sms: 'Keep responses under 160 characters when possible. Use plain text only.',
+    telegram: 'You can use Markdown formatting. Keep responses concise but complete.',
+    discord: 'You can use Discord markdown. Responses can be longer for technical topics.',
+    web: 'Full HTML/markdown supported. Thorough responses preferred.',
+  };
+  const channelContext = channelCtx[channel] || '';
+
+  return `${basePrompt}${memorySection}\n\n## Channel Context\n${channelContext}\n\n## Current Date\n${new Date().toISOString()}`;
+}
+
+// 2B: Complexity Assessment & Multi-Step Reasoning
+function assessComplexity(message: string): 'simple' | 'complex' {
+  const complexIndicators = [
+    /\b(analyze|compare|explain|design|plan|strategy|research|evaluate|calculate|estimate|step.?by.?step|how do i|how does|why does|what is the best|write a|create a|build a|help me with)\b/i,
+    /\?.*\?/,
+    message.length > 200,
+    /\b(and|also|additionally|furthermore|moreover)\b.*\?/i,
+  ];
+  const score = complexIndicators.filter(r => typeof r === 'boolean' ? r : r.test(message)).length;
+  return score >= 2 ? 'complex' : 'simple';
+}
+
+async function callAIWithReasoning(
+  agent: Agent,
+  messages: { role: string; content: string }[],
+  userMessage: string,
+  maxTokens: number
+): Promise<{ text: string; tokensUsed: number }> {
+  const complexity = assessComplexity(userMessage);
+
+  if (complexity === 'simple') {
+    return callAI(agent.provider, agent.model, agent.system_prompt, messages, maxTokens);
+  }
+
+  let plan = '';
+  let planTokens = 0;
+  try {
+    const planResult = await callAI(
+      agent.provider, agent.model, agent.system_prompt,
+      [{ role: 'user', content: `Briefly outline 2-4 steps to fully answer: "${userMessage.slice(0, 300)}"` }],
+      200
+    );
+    plan = planResult.text;
+    planTokens = planResult.tokensUsed;
+  } catch { /* skip on error */ }
+
+  const augmentedMessages = plan
+    ? [
+        ...messages.slice(0, -1),
+        { role: 'user' as const, content: `${userMessage}\n\n[Reasoning steps: ${plan}]` },
+      ]
+    : messages;
+
+  const result = await callAI(agent.provider, agent.model, agent.system_prompt, augmentedMessages, maxTokens);
+  return { text: result.text, tokensUsed: result.tokensUsed + planTokens };
+}
+
+// 2C: Self-Learning / Quality Signals
+function analyzeSentiment(text: string): 'positive' | 'negative' | 'neutral' {
+  const pos = /\b(thanks|great|perfect|awesome|helpful|love it|excellent|exactly|yes|good job)\b/i;
+  const neg = /\b(wrong|bad|useless|not helpful|confused|doesn't work|no that|incorrect|stop)\b/i;
+  if (pos.test(text)) return 'positive';
+  if (neg.test(text)) return 'negative';
+  return 'neutral';
+}
+
+function recordAgentMetrics(agentId: string, responseMs: number, tokensUsed: number, sentiment: 'positive' | 'negative' | 'neutral', isFollowUp: boolean): void {
+  try {
+    if (!db?.data?.agent_metrics) db.data.agent_metrics = [];
+    const today = new Date().toISOString().split('T')[0];
+    let m = db.data.agent_metrics.find(x => x.agent_id === agentId && x.date === today);
+    if (!m) {
+      m = { id: randomUUID(), agent_id: agentId, date: today, messages_sent: 0, avg_response_ms: 0, follow_up_count: 0, satisfaction_score: 0, tokens_used: 0 };
+      db.data.agent_metrics.push(m);
+    }
+    m.avg_response_ms = Math.round((m.avg_response_ms * m.messages_sent + responseMs) / (m.messages_sent + 1));
+    m.messages_sent++;
+    m.tokens_used += tokensUsed;
+    if (isFollowUp) m.follow_up_count++;
+    if (sentiment === 'positive') m.satisfaction_score = Math.min(100, m.satisfaction_score + 2);
+    if (sentiment === 'negative') m.satisfaction_score = Math.max(0, m.satisfaction_score - 3);
+    save();
+  } catch { /* never block */ }
+}
+
+// 2D: Smart Model Selection
+function selectOptimalModel(agent: Agent, messageLength: number, taskType: string): string {
+  if (agent.model && agent.model !== 'auto') return agent.model;
+  if (taskType === 'creative' || messageLength > 500) return 'claude-sonnet-4-5';
+  if (taskType === 'analytical') return 'claude-sonnet-4-5';
+  if (taskType === 'fast_response') return 'claude-haiku-4-5';
+  if (taskType === 'cost_optimized') return 'gemini-1.5-flash';
+  return agent.model || 'claude-haiku-4-5';
+}
+
+function detectTaskType(message: string): string {
+  if (/\b(story|poem|creative|write|imagine|fiction)\b/i.test(message)) return 'creative';
+  if (/\b(analyze|calculate|compare|data|metric|stats|explain|why|how does)\b/i.test(message)) return 'analytical';
+  if (/^(hi|hello|hey|thanks|ok|sure|yes|no)\b/i.test(message) || message.length < 30) return 'fast_response';
+  return 'default';
+}
+
+// 2E: Always-On Agent Heartbeat
+async function processAgentHeartbeat(agent: Agent): Promise<void> {
+  try {
+    if (db?.data?.agent_long_term_memory) {
+      for (const mem of db.data.agent_long_term_memory.filter(m => m.agent_id === agent.id)) {
+        if (mem.facts.length > 30) mem.facts = mem.facts.slice(-30);
+        if (mem.preferences.length > 15) mem.preferences = mem.preferences.slice(-15);
+      }
+    }
+    logActivity({
+      user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name,
+      event_type: 'automation_triggered', channel: 'system',
+      summary: 'Agent heartbeat — always-on maintenance', status: 'success',
+    });
+    save();
+  } catch { /* silent */ }
+}
+
+function startAlwaysOnHeartbeat() {
+  const MS_PER_DAY = 86400000;
+  const now = new Date();
+  const next9am = new Date(now);
+  next9am.setHours(9, 0, 0, 0);
+  if (next9am <= now) next9am.setDate(next9am.getDate() + 1);
+  setTimeout(() => {
+    const run = async () => {
+      if (!db?.data?.agents) return;
+      const alwaysOn = db.data.agents.filter(a => a.always_on && a.is_active);
+      for (const agent of alwaysOn) await processAgentHeartbeat(agent).catch(() => {});
+    };
+    run();
+    setInterval(run, MS_PER_DAY);
+  }, next9am.getTime() - now.getTime());
+}
+
+// ═══ End Agent Intelligence System ══════════════════════════════════════════
+
 // ─── Automation Helpers ───────────────────────────────────────────────────────
 
 function getNextRunAt(cronExpression: string, timezone?: string): string {
@@ -785,7 +1065,7 @@ async function startServer() {
   try {
     const { JSONFileSync } = await import('lowdb/node');
     const adapter = new JSONFileSync<DBSchema>(dbPath);
-    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [] });
+    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [], agent_long_term_memory: [], agent_metrics: [], sms_optouts: [] });
     try { db.read(); } catch { /* fresh */ }
     if (!db.data.scheduled_messages) db.data.scheduled_messages = [];
     if (!db.data.activity_logs) db.data.activity_logs = [];
@@ -801,11 +1081,12 @@ async function startServer() {
   } catch {
     console.warn('[DipperAI] Read-only filesystem, using in-memory DB');
     const { MemorySync } = await import('lowdb');
-    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [] });
+    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [], agent_long_term_memory: [], agent_metrics: [], sms_optouts: [] });
   }
 
   startCronRunner();
   startAutomationRunner();
+  startAlwaysOnHeartbeat();
 
   const app = express();
   app.use(cors({ origin: true, credentials: true }));
@@ -987,8 +1268,13 @@ async function startServer() {
       req.user.tokens_used_today = (req.user.tokens_used_today || 0) + tokensUsed;
       console.log(`[chat] model=${effectiveModel} tokens=${tokensUsed}`);
       save();
-      // Async memory extraction — never block response
-      extractAndUpdateMemory(agent.id, req.userId, 'web', [...history, { role: 'assistant', content }], agent.system_prompt).catch(() => {});
+      // Async: memory extraction + long-term memory + metrics — never block response
+      const fullHistory = [...history, { role: 'assistant', content }];
+      extractAndUpdateMemory(agent.id, req.userId, 'web', fullHistory, agent.system_prompt).catch(() => {});
+      updateLongTermMemory(agent.id, req.userId, 'web', fullHistory).catch(() => {});
+      const sentiment = analyzeSentiment(message);
+      const isFollowUp = history.filter(m => m.role === 'user').length > 1;
+      recordAgentMetrics(agent.id, latency_ms, tokensUsed, sentiment, isFollowUp);
       logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'web', summary: 'Replied to web chat message', details: content.slice(0, 200), model_used: effectiveModel, tokens_used: tokensUsed, latency_ms, status: 'success' });
       res.json({ content, conversationId: convId, model_used: effectiveModel });
     } catch (e: any) {
@@ -1481,7 +1767,10 @@ async function startServer() {
       agent.total_messages++;
       save();
       // Async memory extraction
-      extractAndUpdateMemory(agent.id, telegramUserId, 'telegram', [...tgHistory, { role: 'assistant', content: reply }], agent.system_prompt).catch(() => {});
+      const tgFullHistory = [...tgHistory, { role: 'assistant', content: reply }];
+      extractAndUpdateMemory(agent.id, telegramUserId, 'telegram', tgFullHistory, agent.system_prompt).catch(() => {});
+      updateLongTermMemory(agent.id, telegramUserId, 'telegram', tgFullHistory).catch(() => {});
+      recordAgentMetrics(agent.id, 0, 0, analyzeSentiment(text), tgHistory.filter(m => m.role === 'user').length > 1);
       logActivity({ user_id: agent.user_id, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'telegram', summary: 'Replied to Telegram message', details: reply.slice(0, 200), model_used: effectiveModel, status: 'success' });
     } catch (e) { console.error('[telegram webhook error]', e); }
   });
