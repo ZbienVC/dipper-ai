@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import { Save, Plus, EyeOff, Trash2, AlertTriangle, Copy, Check } from 'lucide-react'
@@ -11,6 +11,10 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'apikeys', label: 'API Keys' },
   { id: 'danger', label: 'Danger Zone' },
 ]
+
+function getToken() {
+  try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
+}
 
 function getUser() {
   try {
@@ -43,6 +47,15 @@ export default function Settings() {
   const [deleteConfirm, setDeleteConfirm] = useState('')
 
   useEffect(() => {
+    const token = getToken()
+    if (!token) return
+    fetch('/api/settings/api-keys', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then((keys: ApiKey[]) => setApiKeys(keys))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
     const tab = searchParams.get('tab') as Tab
     if (tab && TABS.find(t => t.id === tab)) setActiveTab(tab)
   }, [searchParams])
@@ -55,11 +68,22 @@ export default function Settings() {
 
   const saveWorkspace = () => { setWorkspaceSaved(true); setTimeout(() => setWorkspaceSaved(false), 2000) }
 
-  const generateKey = () => {
+  const generateKey = async () => {
     if (!newKeyName.trim()) return
-    const key = 'dip_sk_' + Array.from({ length: 32 }, () => Math.random().toString(36)[2]).join('')
-    setApiKeys(prev => [...prev, { id: Date.now().toString(), name: newKeyName, key, created: new Date().toLocaleDateString() }])
-    setNewKeyName(''); setShowNewKeyForm(false)
+    const token = getToken()
+    if (!token) return
+    try {
+      const res = await fetch('/api/settings/api-keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: newKeyName.trim() }),
+      })
+      if (res.ok) {
+        const key = await res.json()
+        setApiKeys(prev => [...prev, { id: key.id, name: key.name, key: key.key, created: new Date(key.created_at).toLocaleDateString() }])
+        setNewKeyName(''); setShowNewKeyForm(false)
+      }
+    } catch {}
   }
 
   const copyKey = (key: string) => {
@@ -187,7 +211,12 @@ export default function Settings() {
                     <button onClick={() => copyKey(k.key)} className="text-slate-500 hover:text-violet-400 transition-colors p-1.5">
                       {copied === k.key ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}
                     </button>
-                    <button onClick={() => setApiKeys(prev => prev.filter(ak => ak.id !== k.id))} className="text-slate-600 hover:text-red-400 transition-colors p-1.5">
+                    <button onClick={async () => {
+                      const token = getToken();
+                      if (!token) return;
+                      await fetch(`/api/settings/api-keys/${k.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+                      setApiKeys(prev => prev.filter(ak => ak.id !== k.id));
+                    }} className="text-slate-600 hover:text-red-400 transition-colors p-1.5">
                       <Trash2 size={13} />
                     </button>
                   </div>

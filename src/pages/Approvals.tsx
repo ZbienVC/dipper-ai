@@ -1,27 +1,20 @@
-import { useState } from 'react'
+﻿import { useState, useEffect } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
 import { Check, X, Edit3, Clock, MessageSquare } from 'lucide-react'
 
 interface Approval {
   id: string
+  agent_id: string
   agentName: string
   messagePreview: string
+  full_message: string
   channel: string
+  recipient?: string
   timestamp: string
   status: 'pending' | 'approved' | 'rejected'
   rejectionReason?: string
+  created_at: number
 }
-
-const INITIAL_APPROVALS: Approval[] = [
-  { id: '1', agentName: 'Support Pro', messagePreview: 'Hi! I noticed your account has been inactive. I wanted to reach out and see if there\'s anything I can help you with today.', channel: 'SMS', timestamp: '2 min ago', status: 'pending' },
-  { id: '2', agentName: 'The Closer', messagePreview: 'Hey! Just following up on our earlier conversation. I think you\'d be a great fit for our Pro plan. Want to jump on a quick call?', channel: 'Telegram', timestamp: '18 min ago', status: 'pending' },
-  { id: '3', agentName: 'Community Bob', messagePreview: 'We\'ve just launched a new feature — AI-powered analytics. Drop a comment if you\'re excited to try it!', channel: 'Discord', timestamp: '45 min ago', status: 'pending' },
-]
-
-const HISTORY_APPROVALS: Approval[] = [
-  { id: '4', agentName: 'Support Pro', messagePreview: 'Thank you for contacting us! Your refund has been processed and should appear within 3-5 business days.', channel: 'SMS', timestamp: 'Yesterday, 3:42 PM', status: 'approved' },
-  { id: '5', agentName: 'The Closer', messagePreview: 'Hey! Ready to 10x your revenue? Sign up now for 80% OFF — limited time only!!!', channel: 'SMS', timestamp: 'Yesterday, 1:15 PM', status: 'rejected', rejectionReason: 'Too aggressive / spammy tone' },
-]
 
 const channelColors: Record<string, string> = {
   SMS: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
@@ -30,26 +23,85 @@ const channelColors: Record<string, string> = {
   X: 'bg-slate-500/10 text-slate-300 border-slate-500/20',
 }
 
+function getToken() {
+  try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
+}
+
+function formatTime(ts: number) {
+  const diff = Date.now() - ts
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} min ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return new Date(ts).toLocaleDateString()
+}
+
+function mapApproval(a: any): Approval {
+  return {
+    id: a.id,
+    agent_id: a.agent_id,
+    agentName: a.agent_name,
+    messagePreview: a.message_preview,
+    full_message: a.full_message,
+    channel: a.channel?.charAt(0).toUpperCase() + a.channel?.slice(1) || 'Unknown',
+    recipient: a.recipient,
+    timestamp: formatTime(a.created_at),
+    status: a.status,
+    rejectionReason: a.rejection_reason,
+    created_at: a.created_at,
+  }
+}
+
 export default function Approvals() {
   const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending')
-  const [pending, setPending] = useState<Approval[]>(INITIAL_APPROVALS)
-  const [history, setHistory] = useState<Approval[]>(HISTORY_APPROVALS)
+  const [approvals, setApprovals] = useState<Approval[]>([])
+  const [loading, setLoading] = useState(true)
   const [rejectModal, setRejectModal] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
 
-  const handleApprove = (id: string) => {
-    const item = pending.find(a => a.id === id)
-    if (!item) return
-    setPending(prev => prev.filter(a => a.id !== id))
-    setHistory(prev => [{ ...item, status: 'approved', timestamp: 'Just now' }, ...prev])
+  const fetchApprovals = async () => {
+    const token = getToken()
+    if (!token) { setLoading(false); return }
+    try {
+      const res = await fetch('/api/approvals', { headers: { Authorization: `Bearer ${token}` } })
+      if (res.ok) {
+        const data = await res.json()
+        setApprovals(data.map(mapApproval))
+      }
+    } catch {}
+    setLoading(false)
   }
 
-  const handleRejectConfirm = (id: string) => {
-    const item = pending.find(a => a.id === id)
-    if (!item) return
-    setPending(prev => prev.filter(a => a.id !== id))
-    setHistory(prev => [{ ...item, status: 'rejected', timestamp: 'Just now', rejectionReason: rejectReason || 'No reason given' }, ...prev])
+  useEffect(() => { fetchApprovals() }, [])
+
+  const pending = approvals.filter(a => a.status === 'pending')
+  const history = approvals.filter(a => a.status !== 'pending')
+
+  const handleApprove = async (id: string) => {
+    const token = getToken()
+    if (!token) return
+    await fetch(`/api/approvals/${id}/approve`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+    fetchApprovals()
+  }
+
+  const handleRejectConfirm = async (id: string) => {
+    const token = getToken()
+    if (!token) return
+    await fetch(`/api/approvals/${id}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ reason: rejectReason || 'No reason given' }),
+    })
     setRejectModal(null); setRejectReason('')
+    fetchApprovals()
+  }
+
+  const handleDelete = async (id: string) => {
+    const token = getToken()
+    if (!token) return
+    await fetch(`/api/approvals/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+    fetchApprovals()
   }
 
   const displayItems = activeTab === 'pending' ? pending : history
@@ -83,7 +135,12 @@ export default function Approvals() {
         ))}
       </div>
 
-      {displayItems.length === 0 ? (
+      {loading ? (
+        <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-16 text-center">
+          <div className="w-8 h-8 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-slate-500 text-sm">Loading approvals...</p>
+        </div>
+      ) : displayItems.length === 0 ? (
         <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-16 text-center">
           <div className="w-14 h-14 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mx-auto mb-4">
             {activeTab === 'pending' ? <Check size={24} className="text-green-400" /> : <MessageSquare size={24} className="text-slate-500" />}
@@ -132,10 +189,17 @@ export default function Approvals() {
                       className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors">
                       <X size={12} /> Reject
                     </button>
-                    <button className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold border border-[#1e1e2e] text-slate-400 hover:bg-white/5 transition-colors">
-                      <Edit3 size={12} /> Edit
+                    <button onClick={() => handleDelete(item.id)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold border border-[#1e1e2e] text-slate-400 hover:bg-white/5 transition-colors">
+                      <Edit3 size={12} /> Delete
                     </button>
                   </div>
+                )}
+                {item.status !== 'pending' && (
+                  <button onClick={() => handleDelete(item.id)}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold border border-[#1e1e2e] text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors flex-shrink-0">
+                    <X size={12} /> Remove
+                  </button>
                 )}
               </div>
             </div>

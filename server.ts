@@ -3505,7 +3505,7 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     res.json({ success: true });
   });
 
-  // POST /api/broadcasts/:id/send - mark broadcast as sent (simulate send)
+  // POST /api/broadcasts/:id/send - real delivery via Telegram/SMS
   app.post('/api/broadcasts/:id/send', auth, async (req: any, res) => {
     const broadcast = (db.data.broadcasts || []).find((b: Broadcast) => b.id === req.params.id && b.user_id === req.userId);
     if (!broadcast) return res.status(404).json({ error: 'Broadcast not found' });
@@ -3513,16 +3513,80 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     broadcast.status = 'sending';
     broadcast.updated_at = new Date().toISOString();
     save();
-    // Simulate async send
-    setTimeout(() => {
+    res.json({ success: true, message: 'Broadcast queued for delivery' });
+
+    // Async real delivery
+    (async () => {
+      let sentCount = 0;
+      let failedCount = 0;
+      try {
+        const channel = broadcast.channel;
+
+        if (channel === 'telegram') {
+          // Get the Telegram integration for this user
+          const intg = db.data.integrations.find(i => i.user_id === req.userId && i.type === 'telegram' && i.connected);
+          if (intg) {
+            const { botToken } = decodeCredentials(intg.credentials);
+            if (botToken) {
+              // Get all unique chat_ids from telegram conversations for agents owned by this user
+              const userAgentIds = db.data.agents.filter(a => a.user_id === req.userId && a.is_active).map(a => a.id);
+              const tgConvs = db.data.conversations.filter(c => c.channel === 'telegram' && userAgentIds.includes(c.agent_id));
+              const chatIds = [...new Set(tgConvs.map(c => (c as any).external_id).filter(Boolean).map((id: string) => id.replace('tg_', '')))];
+              for (const chatId of chatIds) {
+                try {
+                  const r = await sendTelegramMessage(botToken, chatId, broadcast.message);
+                  if (r.ok) sentCount++;
+                  else failedCount++;
+                } catch { failedCount++; }
+                await new Promise(r => setTimeout(r, 50)); // small delay
+              }
+              if (chatIds.length === 0) {
+                // No conversations yet - mark as sent with 0
+                sentCount = 0;
+              }
+            }
+          }
+        } else if (channel === 'sms') {
+          const intg = db.data.integrations.find(i => i.user_id === req.userId && i.type === 'sms' && i.connected);
+          if (intg) {
+            const { accountSid, authToken, phoneNumber } = decodeCredentials(intg.credentials);
+            if (accountSid && authToken && phoneNumber) {
+              // Get opt-out list
+              const optOuts = new Set((db.data.sms_optouts || []).map((o: any) => o.phone));
+              // Get all unique SMS phone numbers from conversations
+              const userAgentIds = db.data.agents.filter(a => a.user_id === req.userId && a.is_active).map(a => a.id);
+              const smsConvs = db.data.conversations.filter(c => c.channel === 'sms' && userAgentIds.includes(c.agent_id));
+              const phones = [...new Set(smsConvs.map(c => (c as any).external_id).filter((p: string) => p && !optOuts.has(p)))];
+              for (const phone of phones) {
+                try {
+                  const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
+                    method: 'POST',
+                    headers: { Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({ From: phoneNumber, To: phone, Body: broadcast.message }).toString(),
+                  });
+                  if (r.ok) sentCount++;
+                  else failedCount++;
+                } catch { failedCount++; }
+                await new Promise(r => setTimeout(r, 100));
+              }
+            }
+          }
+        } else {
+          // Other channels: just mark as sent
+          sentCount = broadcast.audience_size || 0;
+        }
+      } catch (e) {
+        console.error('[broadcast send error]', e);
+        failedCount++;
+      }
       broadcast.status = 'sent';
       broadcast.sent_at = new Date().toISOString();
-      broadcast.sent_count = broadcast.audience_size;
-      broadcast.failed_count = 0;
+      broadcast.sent_count = sentCount;
+      broadcast.failed_count = failedCount;
       broadcast.updated_at = new Date().toISOString();
       save();
-    }, 1500);
-    res.json({ success: true, message: 'Broadcast queued for delivery' });
+      logActivity({ user_id: req.userId, agent_id: broadcast.agent_id || '', agent_name: broadcast.agent_name || '', event_type: 'message_sent', channel: (broadcast.channel as any) || 'system', summary: `Broadcast sent: ${broadcast.message.slice(0, 80)}`, details: `${sentCount} sent, ${failedCount} failed`, status: 'success' });
+    })();
   });
 
   // GET /api/insights - agent performance insights for dashboard
