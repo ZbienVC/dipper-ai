@@ -4,7 +4,7 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 import { randomUUID } from 'crypto';
-import { Low } from 'lowdb';
+import { createSQLiteDB, migrateFromJSON } from './db-sqlite.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import Anthropic from '@anthropic-ai/sdk';
@@ -486,7 +486,7 @@ async function sendTelegramTyping(botToken: string, chatId: string | number) {
 }
 
 // ─── Express ──────────────────────────────────────────────────────────────────
-let db: Low<DBSchema>;
+let db: ReturnType<typeof createSQLiteDB>;
 const save = () => { try { db.write(); } catch { /* in-memory mode */ } };
 const findUser = (id: string) => db.data.users.find(u => u.id === id);
 const findUserByEmail = (email: string) => db.data.users.find(u => u.email === email.toLowerCase());
@@ -1302,35 +1302,12 @@ function startCronRunner() {
 
 async function startServer() {
   // Initialize DB
-  const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'dipperai.json');
-  try {
-    const { JSONFileSync } = await import('lowdb/node');
-    const adapter = new JSONFileSync<DBSchema>(dbPath);
-    db = new Low<DBSchema>(adapter, { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [], agent_long_term_memory: [], agent_metrics: [], sms_optouts: [], broadcasts: [], approvals: [], api_keys: [], escalation_alerts: [] });
-    try { db.read(); } catch { /* fresh */ }
-    if (!db.data.scheduled_messages) db.data.scheduled_messages = [];
-    if (!db.data.activity_logs) db.data.activity_logs = [];
-    if (!db.data.user_memories) db.data.user_memories = [];
-    if (!db.data.automations) db.data.automations = [];
-    if (!db.data.automation_runs) db.data.automation_runs = [];
-    if (!db.data.agent_teams) db.data.agent_teams = [];
-    if (!db.data.team_tasks) db.data.team_tasks = [];
-    if (!db.data.team_task_logs) db.data.team_task_logs = [];
-    if (!db.data.leads) db.data.leads = [];
-    if (!db.data.agent_long_term_memory) db.data.agent_long_term_memory = [];
-    if (!db.data.agent_metrics) db.data.agent_metrics = [];
-    if (!db.data.sms_optouts) db.data.sms_optouts = [];
-    if (!db.data.broadcasts) db.data.broadcasts = [];
-    if (!db.data.approvals) db.data.approvals = [];
-    if (!db.data.api_keys) db.data.api_keys = [];
-    if (!db.data.escalation_alerts) db.data.escalation_alerts = [];
-    db.write();
-    console.log('[DipperAI] File DB:', dbPath);
-  } catch {
-    console.warn('[DipperAI] Read-only filesystem, using in-memory DB');
-    const { MemorySync } = await import('lowdb');
-    db = new Low<DBSchema>(new MemorySync<DBSchema>(), { users: [], agents: [], conversations: [], messages: [], integrations: [], scheduled_messages: [], activity_logs: [], user_memories: [], automations: [], automation_runs: [], knowledge_sources: [], agent_teams: [], team_tasks: [], team_task_logs: [], leads: [], agent_long_term_memory: [], agent_metrics: [], sms_optouts: [], broadcasts: [] });
-  }
+  // SQLite database (WAL mode — safe for concurrent access, no JSON corruption)
+  const sqlitePath = process.env.DATABASE_PATH || path.join(process.cwd(), 'dipperai.db');
+  db = createSQLiteDB(sqlitePath);
+  // One-time migration from old JSON file if it exists
+  const jsonPath = process.env.DATABASE_PATH?.replace('.db', '.json') || path.join(process.cwd(), 'dipperai.json');
+  await migrateFromJSON(jsonPath, db);
 
   startCronRunner();
   startAutomationRunner();
