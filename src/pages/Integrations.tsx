@@ -94,6 +94,7 @@ function timeAgo(iso: string) {
 
 export default function Integrations() {
   const navigate = useNavigate()
+  useEffect(() => { document.title = 'Integrations — DipperAI' }, [])
   const [records, setRecords] = useState<IntegrationRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [activeType, setActiveType] = useState<string | null>(null)

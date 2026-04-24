@@ -27,6 +27,7 @@ const quickActions = [
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  useEffect(() => { document.title = 'Dashboard — DipperAI' }, [])
   const [agents, setAgents] = useState<any[]>([])
   const [analytics, setAnalytics] = useState<{ totalMessages: number } | null>(null)
   const [integrationCount, setIntegrationCount] = useState(0)

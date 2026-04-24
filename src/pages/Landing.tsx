@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { useEffect } from 'react'
 import {
   ArrowRight, Zap, Bot, Shield, Globe, Check, MessageSquare,
   BarChart2, Plug, Users, TrendingUp, ChevronRight, Star, X
@@ -128,6 +129,7 @@ const pricing = [
 ]
 
 export default function Landing() {
+  useEffect(() => { document.title = 'DipperAI — Build AI Agents That Reply Automatically' }, [])
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-slate-400">
       {/* Navbar */}
@@ -173,8 +175,8 @@ export default function Landing() {
             <Link to="/signup" className="gradient-btn font-bold px-8 py-3.5 rounded-xl text-base flex items-center gap-2">
               Get Started Free <ArrowRight size={16} />
             </Link>
-            <Link to="/signup" className="flex items-center gap-2 text-slate-300 font-semibold px-8 py-3.5 rounded-xl border border-[#1e1e2e] hover:bg-white/5 transition-colors text-sm">
-              View Demo <ChevronRight size={16} />
+            <Link to="/dashboard" className="flex items-center gap-2 text-slate-300 font-semibold px-8 py-3.5 rounded-xl border border-[#1e1e2e] hover:bg-white/5 transition-colors text-sm">
+              Try Demo <ChevronRight size={16} />
             </Link>
           </div>
           <p className="text-xs text-slate-600 mt-5">Free forever · No credit card required</p>

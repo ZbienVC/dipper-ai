@@ -492,6 +492,13 @@ export default function AgentDetail() {
             )
           })}
         </select>
+        <button
+          onClick={() => { const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); setMessages([{ role: 'agent', text: 'Conversation cleared. How can I help you?', ts: t }]); }}
+          className="p-1.5 rounded-lg border border-[#1e1e2e] text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
+          title="Clear conversation"
+        >
+          <Trash2 size={13} />
+        </button>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#0a0a0f]">
         {messages.map((msg, i) => (
@@ -1886,7 +1893,7 @@ export default function AgentDetail() {
                 className="flex items-center gap-1 text-xs transition-colors hover:opacity-80">
                 {alwaysOnToggling ? <Loader2 size={14} className="animate-spin text-violet-400" /> :
                   alwaysOn ? <ToggleRight size={18} className="text-violet-400" /> : <ToggleLeft size={18} className="text-slate-500" />}
-                <span className={alwaysOn ? 'text-violet-400' : 'text-slate-500'}>Always-On</span>
+                <span className={alwaysOn ? 'text-violet-400' : 'text-slate-500'}>Always-On{alwaysOn ? ' (24/7)' : ''}</span>
               </button>
             </div>
           </div>

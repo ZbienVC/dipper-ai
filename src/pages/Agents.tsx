@@ -401,9 +401,16 @@ export default function Agents() {
                   {badge && (
                     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span>
                   )}
-                  {(agent.channels || []).map(c => (
-                    <span key={c} className="text-xs bg-white/5 text-slate-500 border border-[#1e1e2e] px-2 py-0.5 rounded-full capitalize">{c}</span>
-                  ))}
+                  {(agent.channels || []).slice(0, 3).map(c => {
+                    const channelDots: Record<string, string> = { telegram: 'bg-blue-500', discord: 'bg-indigo-500', sms: 'bg-green-500', twitter: 'bg-slate-400', web: 'bg-violet-500', webchat: 'bg-violet-500' }
+                    const dot = channelDots[c] || 'bg-slate-500'
+                    return (
+                      <span key={c} title={c} className="flex items-center gap-1 text-xs bg-white/5 text-slate-500 border border-[#1e1e2e] px-2 py-0.5 rounded-full capitalize">
+                        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
+                        {c}
+                      </span>
+                    )
+                  })}
                 </div>
 
                 {/* Stats */}
