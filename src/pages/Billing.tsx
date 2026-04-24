@@ -1,4 +1,4 @@
-import DashboardLayout from '../components/DashboardLayout'
+﻿import DashboardLayout from '../components/DashboardLayout'
 import { useState, useEffect } from 'react'
 import { Check, Zap, ExternalLink, Loader2, AlertTriangle } from 'lucide-react'
 

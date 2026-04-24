@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+﻿import { useState, useCallback, useRef } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
 import { Search, MessageSquare, Bot, Filter, ChevronRight, X } from 'lucide-react'
 
@@ -87,7 +87,11 @@ export default function ConversationSearch() {
             <input
               type="text"
               value={query}
-              onChange={e => setQuery(e.target.value)}
+              onChange={e => {
+                setQuery(e.target.value)
+                if (debounceRef.current) clearTimeout(debounceRef.current)
+                if (e.target.value.trim()) debounceRef.current = setTimeout(doSearch, 300)
+              }}
               onKeyDown={e => e.key === 'Enter' && doSearch()}
               placeholder="Search conversations..."
               className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-white/5 border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white placeholder-slate-600 text-sm"
@@ -134,7 +138,14 @@ export default function ConversationSearch() {
             <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-8 text-center">
               <MessageSquare size={24} className="text-slate-600 mx-auto mb-3" />
               <p className="text-slate-400 text-sm font-semibold">No conversations found</p>
-              <p className="text-slate-600 text-xs mt-1">Try different keywords or remove filters</p>
+              <p className="text-slate-600 text-xs mt-2 max-w-xs mx-auto">Try different keywords, remove the channel filter, or check that your agents have received messages.</p>
+              <div className="mt-3 flex flex-wrap gap-2 justify-center">
+                {['hello', 'help', 'order', 'price'].map(s => (
+                  <button key={s} onClick={() => { setQuery(s); setTimeout(doSearch, 50) }} className="text-xs px-3 py-1 rounded-full bg-white/5 border border-[#1e1e2e] text-slate-400 hover:text-slate-200 transition-colors">
+                    Try "{s}"
+                  </button>
+                ))}
+              </div>
             </div>
           ) : results.length === 0 ? (
             <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-8 text-center">

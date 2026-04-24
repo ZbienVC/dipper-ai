@@ -1,10 +1,11 @@
-import { ReactNode, useState, useRef, useEffect } from 'react'
+﻿import { ReactNode, useState, useRef, useEffect } from 'react'
 import React from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Bot, LayoutTemplate, Plug, CheckSquare,
   BarChart2, CreditCard, Settings, Bell, Search,
-  LogOut, ChevronDown, Menu, X, User, Zap, Activity, Users2, Users, FlaskConical, Radio, FileText
+  LogOut, ChevronDown, Menu, X, User, Zap, Activity, Users2, Users, FlaskConical, Radio, FileText,
+  Command
 } from 'lucide-react'
 
 const navItems: { icon: React.ElementType; label: string; path: string; badge?: string | number }[] = [
@@ -40,11 +41,89 @@ function getUser(): AppUser {
   return { email: '', name: '' }
 }
 
+// ─── Command Palette ───────────────────────────────────────────────────────────
+function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const navigate = useNavigate()
+  const [query, setQuery] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (open) {
+      setTimeout(() => inputRef.current?.focus(), 50)
+      setQuery('')
+    }
+  }, [open])
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    if (open) document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
+  const commands = navItems.map(n => ({ label: n.label, path: n.path, icon: n.icon }))
+  commands.push({ label: 'New Agent', path: '/dashboard/agents/new', icon: Bot })
+
+  const filtered = query.trim()
+    ? commands.filter(c => c.label.toLowerCase().includes(query.toLowerCase()))
+    : commands
+
+  function go(path: string) {
+    navigate(path)
+    onClose()
+  }
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-start justify-center pt-24 px-4" onClick={onClose}>
+      <div className="w-full max-w-lg bg-[#12121a] border border-[#1e1e2e] rounded-2xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-[#1e1e2e]">
+          <Search size={16} className="text-slate-500 flex-shrink-0" />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && filtered.length > 0) go(filtered[0].path) }}
+            placeholder="Go to..."
+            className="flex-1 bg-transparent text-white placeholder-slate-600 text-sm focus:outline-none"
+          />
+          <kbd className="text-xs text-slate-600 border border-[#1e1e2e] px-1.5 py-0.5 rounded">Esc</kbd>
+        </div>
+        <div className="max-h-80 overflow-y-auto py-2">
+          {filtered.length === 0 ? (
+            <p className="text-slate-600 text-sm text-center py-6">No results</p>
+          ) : filtered.map(cmd => {
+            const Icon = cmd.icon
+            return (
+              <button
+                key={cmd.path}
+                onClick={() => go(cmd.path)}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+              >
+                <Icon size={15} className="text-slate-500 flex-shrink-0" />
+                {cmd.label}
+              </button>
+            )
+          })}
+        </div>
+        <div className="px-4 py-2 border-t border-[#1e1e2e] flex items-center gap-2 text-xs text-slate-600">
+          <kbd className="border border-[#1e1e2e] px-1.5 py-0.5 rounded">Enter</kbd> to navigate
+          <span className="ml-2">Press</span>
+          <kbd className="border border-[#1e1e2e] px-1.5 py-0.5 rounded">/</kbd> anywhere to open
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function DashboardLayout({ children, title }: Props) {
   const location = useLocation()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const user = getUser()
 
@@ -57,6 +136,21 @@ export default function DashboardLayout({ children, title }: Props) {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  // Global "/" shortcut for command palette
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (paletteOpen) return
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (e.key === '/') {
+        e.preventDefault()
+        setPaletteOpen(true)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [paletteOpen])
 
   const handleLogout = () => {
     localStorage.removeItem('dipperai_user')
@@ -154,6 +248,9 @@ export default function DashboardLayout({ children, title }: Props) {
 
   return (
     <div className="flex h-screen bg-[#0a0a0f] overflow-hidden">
+      {/* Command Palette */}
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex flex-col w-60 bg-[#0d0d15] border-r border-[#1e1e2e] flex-shrink-0">
         <Sidebar />
@@ -181,16 +278,23 @@ export default function DashboardLayout({ children, title }: Props) {
           </button>
           {title && <h1 className="text-base font-semibold text-white hidden md:block">{title}</h1>}
           <div className="flex-1 max-w-xs">
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
-              <input
-                type="text"
-                placeholder="Search..."
-                className="w-full pl-8 pr-4 py-1.5 text-sm bg-white/5 border border-[#1e1e2e] rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-slate-300 placeholder-slate-600 transition-all"
-              />
-            </div>
+            <button
+              onClick={() => setPaletteOpen(true)}
+              className="w-full flex items-center gap-2 pl-3 pr-4 py-1.5 text-sm bg-white/5 border border-[#1e1e2e] rounded-lg text-slate-500 hover:border-violet-500/40 transition-all"
+            >
+              <Search size={14} />
+              <span className="flex-1 text-left">Search...</span>
+              <kbd className="text-xs border border-[#1e1e2e] px-1 py-0.5 rounded">/</kbd>
+            </button>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setPaletteOpen(true)}
+              title="Command palette (/)"
+              className="p-2 text-slate-500 hover:text-slate-300 hover:bg-white/5 rounded-lg transition-colors"
+            >
+              <Command size={16} />
+            </button>
             <button className="relative p-2 text-slate-500 hover:text-slate-300 hover:bg-white/5 rounded-lg transition-colors">
               <Bell size={16} />
               <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-violet-500" />
@@ -212,4 +316,3 @@ export default function DashboardLayout({ children, title }: Props) {
     </div>
   )
 }
-

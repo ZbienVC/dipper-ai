@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import { ArrowRight, Bot, Clock, X, Copy, Check } from 'lucide-react'
@@ -402,7 +402,7 @@ export default function Templates() {
                 >
                   Preview
                 </button>
-                <button onClick={() => navigate('/dashboard/agents/new')}
+                <button onClick={() => navigate('/dashboard/agents/new', { state: { template: { id: t.name.toLowerCase().replace(/\s+/g, '-'), name: t.name, emoji: t.emoji, systemPrompt: t.systemPrompt, tone: 'friendly' } } })}
                   className="flex-1 gradient-btn py-2 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5">
                   Use Template <ArrowRight size={13} />
                 </button>

@@ -611,6 +611,7 @@ export default function Leads() {
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<'last_contact' | 'message_count' | 'value'>('last_contact')
+  const [stageFilter, setStageFilter] = useState('')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const load = useCallback(async () => {
@@ -904,6 +905,23 @@ export default function Leads() {
               New Agent
             </button>
           </div>
+        </div>
+
+        {/* Quick filter tabs */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {([{key: '', label: 'All'}, ...STAGES.map(s => ({key: s.key, label: s.label}))]).map(tab => {
+            const count = tab.key === '' ? leads.length : leads.filter(l => l.stage === tab.key).length
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setStageFilter(tab.key)}
+                className={stageFilter === tab.key ? 'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border gradient-btn border-transparent' : 'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border bg-white/5 border-[#1e1e2e] text-slate-400 hover:text-slate-200 hover:border-violet-500/30'}
+              >
+                {tab.label}
+                {count > 0 && <span className={stageFilter === tab.key ? 'px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-white/20' : 'px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-white/10'}>{count}</span>}
+              </button>
+            )
+          })}
         </div>
 
         {/* View tabs + search */}
