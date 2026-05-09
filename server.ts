@@ -4171,7 +4171,7 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   });
 
   // ─── Agent Health Monitoring ──────────────────────────────────────────────
-  app.get('/api/agents/health', requireAuth, async (req: any, res) => {
+  app.get('/api/agents/health', auth, async (req: any, res) => {
     try {
       const db = await getDb();
       const agents = db.data.agents.filter((a: Agent) => a.user_id === req.user.id);
@@ -4218,7 +4218,7 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   });
 
   // ─── Agent Duplication ────────────────────────────────────────────────────
-  app.post('/api/agents/:id/duplicate', requireAuth, async (req: any, res) => {
+  app.post('/api/agents/:id/duplicate', auth, async (req: any, res) => {
     try {
       const db = await getDb();
       const source = db.data.agents.find((a: Agent) => a.id === req.params.id && a.user_id === req.user.id);
@@ -4243,7 +4243,7 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   });
 
   // ─── Conversation Search ──────────────────────────────────────────────────
-  app.get('/api/conversations/search', requireAuth, async (req: any, res) => {
+  app.get('/api/conversations/search', auth, async (req: any, res) => {
     try {
       const db = await getDb();
       const { q = '', agent: agentId = '', channel = '', limit = '50', offset = '0' } = req.query as any;
@@ -4299,7 +4299,7 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   });
 
   // ─── Export Endpoints ─────────────────────────────────────────────────────
-  app.get('/api/activity/export', requireAuth, async (req: any, res) => {
+  app.get('/api/activity/export', auth, async (req: any, res) => {
     try {
       const db = await getDb();
       const logs = db.data.activityLogs.filter((l: ActivityLog) => l.user_id === req.user.id);
@@ -4319,7 +4319,7 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     } catch (e: any) { res.status(500).json({ error: e?.message }); }
   });
 
-  app.get('/api/leads/export', requireAuth, async (req: any, res) => {
+  app.get('/api/leads/export', auth, async (req: any, res) => {
     try {
       const db = await getDb();
       const leads = db.data.leads.filter((l: Lead) => l.user_id === req.user.id);
