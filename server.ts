@@ -4491,23 +4491,21 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     app.use(sirv('dist', { single: true }));
   }
 
-  
-// ─── Admin: Force-promote endpoint ──────────────────────────────────────────
-app.post('/api/admin/promote', (req: any, res: any) => {
-  const { secret, email } = req.body;
-  if (secret !== (process.env.ADMIN_SECRET || 'dipperai-admin-2024')) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  const targetEmail = email || ADMIN_EMAIL;
-  const user = db.data.users.find((u: any) => u.email === targetEmail);
-  if (!user) return res.status(404).json({ error: 'User not found. Register first, then promote.' });
-  user.plan = 'admin';
-  db.write();
-  console.log('[admin] Manually promoted', targetEmail, 'to admin');
-  res.json({ success: true, message: `${targetEmail} is now admin` });
-});
+  // ─── Admin: Force-promote ─────────────────────────────────────────────────
+  app.post('/api/admin/promote', (req: any, res: any) => {
+    const { secret, email } = req.body;
+    if (secret !== (process.env.ADMIN_SECRET || 'dipperai-admin-2024')) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const targetEmail = email || ADMIN_EMAIL;
+    const user = db.data.users.find((u: any) => u.email === targetEmail);
+    if (!user) return res.status(404).json({ error: 'User not found. Register first.' });
+    user.plan = 'admin';
+    db.write();
+    res.json({ success: true, message: targetEmail + ' is now admin' });
+  });
 
-app.listen(PORT, () => console.log(`[DipperAI] Running on http://localhost:${PORT}`));
+  app.listen(PORT, () => console.log('[DipperAI] Running on http://localhost:' + PORT));
 }
 
 startServer().catch(console.error);
