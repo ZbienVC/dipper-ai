@@ -26,6 +26,12 @@ const BUSINESS_BENEFITS = [
 ]
 
 export default function UpgradeModal({ feature, onClose, onUpgrade }: UpgradeModalProps) {
+  // Admin users should never see upgrade prompts
+  const storedUser = (() => { try { const r = localStorage.getItem('dipperai_user'); return r ? JSON.parse(r) : {}; } catch { return {}; } })();
+  if (storedUser?.plan === 'admin' || storedUser?.email === 'zbienstock@gmail.com') {
+    onClose();
+    return null;
+  }
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className="bg-[#0f0f17] border border-[#1e1e2e] rounded-2xl w-full max-w-md shadow-2xl">
