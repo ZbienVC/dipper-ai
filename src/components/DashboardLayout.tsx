@@ -6,7 +6,7 @@ import {
   BarChart2, CreditCard, Settings, Bell, Search,
   LogOut, ChevronDown, Menu, X, User, Zap, Activity, Users2, Users, FlaskConical, Radio, FileText,
   Command
-} from 'lucide-react'
+, Film } from 'lucide-react'
 
 const navItems: { icon: React.ElementType; label: string; path: string; badge?: string | number }[] = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
@@ -169,6 +169,7 @@ export default function DashboardLayout({ children, title }: Props) {
           </div>
           <span className="text-lg font-bold text-white tracking-tight">DipperAI</span>
         </Link>
+              
       </div>
 
       {/* Nav */}
