@@ -4509,8 +4509,14 @@ app.post('/api/admin/promote', (req: any, res: any) => {
 
 
 // ─── Media Processing Pipeline ───────────────────────────────────────────────
-const MEDIA_TMP = path.join(process.cwd(), 'media-tmp');
-if (!existsSync(MEDIA_TMP)) mkdirSync(MEDIA_TMP, { recursive: true });
+let MEDIA_TMP = '/tmp/media-tmp';
+try {
+  MEDIA_TMP = path.join(process.cwd(), 'media-tmp');
+  if (!existsSync(MEDIA_TMP)) mkdirSync(MEDIA_TMP, { recursive: true });
+} catch (e) {
+  console.warn('[media] Could not create media-tmp dir, using /tmp:', e.message);
+  try { if (!existsSync(MEDIA_TMP)) mkdirSync(MEDIA_TMP, { recursive: true }); } catch {}
+}
 
 type MediaJob = {
   status: 'uploaded' | 'processing' | 'done' | 'error';
