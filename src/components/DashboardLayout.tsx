@@ -423,6 +423,7 @@ export default function DashboardLayout({ children }: Props) {
               <span>Search</span>
               <kbd style={{ fontSize: 9, background: 'rgba(255,255,255,0.06)', padding: '1px 4px', borderRadius: 3, color: '#2a3255' }}>⌘K</kbd>
             </button>
+            <PlatformGuide />
             <Link to="/dashboard/agents/new"
               style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 9, background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: '#fff', textDecoration: 'none', fontSize: 12, fontWeight: 700, boxShadow: '0 2px 12px rgba(124,58,237,0.3)', whiteSpace: 'nowrap' }}>
               <Sparkles size={12} />
