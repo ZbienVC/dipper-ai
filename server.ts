@@ -4511,6 +4511,86 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     app.use(sirv('dist', { single: true }));
   }
 
+
+  // ─── Forgot / Reset Password ───────────────────────────────────────────────
+  // In-memory store for reset tokens (survives until restart; good enough for single instance)
+  const passwordResetTokens = new Map<string, { userId: string; email: string; expiresAt: number }>();
+
+  app.post('/api/auth/forgot-password', async (req: any, res: any) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email required' });
+
+    const user = db.data.users.find((u: any) => u.email === email.toLowerCase().trim());
+    // Always respond OK to prevent email enumeration
+    if (!user) return res.json({ ok: true });
+
+    // Generate secure token
+    const token = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
+    const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour
+    passwordResetTokens.set(token, { userId: user.id, email: user.email, expiresAt });
+
+    const appUrl = process.env.APP_URL || 'https://dipper-ai-production.up.railway.app';
+    const resetUrl = `${appUrl}/reset-password?token=${token}`;
+
+    // Send email via Resend if configured, else log
+    const resendKey = process.env.RESEND_API_KEY;
+    if (resendKey) {
+      try {
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: 'DipperAI <onboarding@resend.dev>',
+            to: user.email,
+            subject: 'Reset your DipperAI password',
+            html: `
+              <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#0a0a0f;color:#f0f4ff;padding:40px;border-radius:16px">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:32px">
+                  <div style="width:40px;height:40px;background:linear-gradient(135deg,#7c3aed,#6d28d9);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">⚡</div>
+                  <span style="font-size:20px;font-weight:700;color:#fff">DipperAI</span>
+                </div>
+                <h2 style="color:#fff;margin:0 0 12px">Reset your password</h2>
+                <p style="color:#8b9cc8;margin:0 0 28px;line-height:1.6">Click the button below to set a new password. This link expires in 1 hour.</p>
+                <a href="${resetUrl}" style="display:inline-block;background:linear-gradient(135deg,#7c3aed,#6d28d9);color:#fff;padding:14px 28px;border-radius:12px;text-decoration:none;font-weight:600;font-size:14px">Reset Password</a>
+                <p style="color:#4a5580;font-size:12px;margin-top:28px">If you didn't request this, you can safely ignore this email.</p>
+              </div>
+            `,
+          }),
+        });
+      } catch (e) {
+        console.error('[reset] Email send failed:', e);
+      }
+    } else {
+      // Dev fallback - log the link
+      console.log('[reset] RESET LINK (no RESEND_API_KEY set):', resetUrl);
+    }
+
+    res.json({ ok: true });
+  });
+
+  app.post('/api/auth/reset-password', async (req: any, res: any) => {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: 'Token and password required' });
+    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const record = passwordResetTokens.get(token);
+    if (!record) return res.status(400).json({ error: 'Invalid or expired reset link' });
+    if (Date.now() > record.expiresAt) {
+      passwordResetTokens.delete(token);
+      return res.status(400).json({ error: 'Reset link has expired. Please request a new one.' });
+    }
+
+    const user = db.data.users.find((u: any) => u.id === record.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.password_hash = await bcrypt.hash(password, 12);
+    db.write();
+    passwordResetTokens.delete(token);
+
+    console.log('[reset] Password reset for:', user.email);
+    res.json({ ok: true });
+  });
+
   // Admin promote endpoint
   app.post('/api/admin/promote', (req: any, res: any) => {
     const { secret, email } = req.body;
