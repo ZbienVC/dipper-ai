@@ -4614,9 +4614,9 @@ Respond ONLY valid JSON: {"description":"...","operations":[{"op":"..."}]}`;
 });
 
 async function mediaVideo(inp:string, out:string, ops:any[], jobId:string): Promise<void> {
-  const ffMod:any = await import('fluent-ffmpeg');
+  let ffMod: any, inst: any;
+  try { ffMod = await import('fluent-ffmpeg'); inst = await import('@ffmpeg-installer/ffmpeg'); } catch(e) { throw new Error('Video processing not available: ' + (e as any).message); }
   const ff = ffMod.default || ffMod;
-  const inst:any = await import('@ffmpeg-installer/ffmpeg');
   ff.setFfmpegPath((inst.default||inst).path);
   return new Promise((resolve,reject)=>{
     let cmd = ff(inp);
