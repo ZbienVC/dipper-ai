@@ -4166,9 +4166,9 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   });
 
   // ─── Agent Health Monitoring ──────────────────────────────────────────────
-  app.get('/api/agents/health', requireAuth, async (req: any, res) => {
+  app.get('/api/agents/health', auth, async (req: any, res) => {
     try {
-      const db = await getDb();
+      // db is global
       const agents = db.data.agents.filter((a: Agent) => a.user_id === req.user.id);
       const now = Date.now();
       const health = agents.map((agent: Agent) => {
@@ -4213,9 +4213,9 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   });
 
   // ─── Agent Duplication ────────────────────────────────────────────────────
-  app.post('/api/agents/:id/duplicate', requireAuth, async (req: any, res) => {
+  app.post('/api/agents/:id/duplicate', auth, async (req: any, res) => {
     try {
-      const db = await getDb();
+      // db is global
       const source = db.data.agents.find((a: Agent) => a.id === req.params.id && a.user_id === req.user.id);
       if (!source) return res.status(404).json({ error: 'Agent not found' });
       const newAgent: Agent = {
@@ -4238,9 +4238,9 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   });
 
   // ─── Conversation Search ──────────────────────────────────────────────────
-  app.get('/api/conversations/search', requireAuth, async (req: any, res) => {
+  app.get('/api/conversations/search', auth, async (req: any, res) => {
     try {
-      const db = await getDb();
+      // db is global
       const { q = '', agent: agentId = '', channel = '', limit = '50', offset = '0' } = req.query as any;
       // Get user's agents
       const userAgentIds = new Set(
@@ -4294,9 +4294,9 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   });
 
   // ─── Export Endpoints ─────────────────────────────────────────────────────
-  app.get('/api/activity/export', requireAuth, async (req: any, res) => {
+  app.get('/api/activity/export', auth, async (req: any, res) => {
     try {
-      const db = await getDb();
+      // db is global
       const logs = db.data.activityLogs.filter((l: ActivityLog) => l.user_id === req.user.id);
       const headers = ['id', 'agent_name', 'event_type', 'channel', 'summary', 'status', 'model_used', 'tokens_used', 'latency_ms', 'created_at'];
       const csvRows = [headers.join(',')];
@@ -4314,9 +4314,9 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     } catch (e: any) { res.status(500).json({ error: e?.message }); }
   });
 
-  app.get('/api/leads/export', requireAuth, async (req: any, res) => {
+  app.get('/api/leads/export', auth, async (req: any, res) => {
     try {
-      const db = await getDb();
+      // db is global
       const leads = db.data.leads.filter((l: Lead) => l.user_id === req.user.id);
       const headers = ['id', 'display_name', 'email', 'phone', 'channel', 'stage', 'agent_name', 'message_count', 'tags', 'notes', 'deal_value', 'created_at', 'last_seen'];
       const csvRows = [headers.join(',')];
