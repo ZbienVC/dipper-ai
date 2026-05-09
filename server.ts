@@ -4591,6 +4591,40 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     res.json({ ok: true });
   });
 
+
+  // ─── Platform Guide AI ────────────────────────────────────────────────────
+  app.post('/api/platform-guide', async (req: any, res: any) => {
+    const { messages } = req.body;
+    if (!messages?.length) return res.status(400).json({ error: 'Messages required' });
+
+    const guideSystem = `You are the DipperAI Platform Guide — a friendly, concise AI assistant. Help users navigate DipperAI and achieve their goals.
+
+Pages: /dashboard (overview), /dashboard/agents (list/manage agents), /dashboard/agents/new (create agent), /dashboard/templates (pre-built templates), /dashboard/playground (test agents safely), /dashboard/integrations (connect Telegram/SMS/Discord), /dashboard/leads (contacts captured by agents), /dashboard/broadcasts (send bulk messages), /dashboard/teams (team collaboration), /dashboard/automations (set up triggers and rules), /dashboard/approvals (review agent responses before sending), /dashboard/analytics (performance charts), /dashboard/reports (export data), /dashboard/activity (live event log), /dashboard/media (AI video/image editor and sticker creator), /dashboard/billing (plans and subscription), /dashboard/settings (account preferences).
+
+Respond ONLY with valid JSON (no markdown):
+{"message":"1-3 sentence friendly response","action":{"label":"Short button label","path":"/dashboard/path"}}
+Omit the action field if no specific navigation needed.`;
+
+    try {
+      const reply = await callAI('openai', 'gpt-4o-mini', guideSystem, messages.slice(-6), 300);
+      res.json({ content: reply });
+    } catch (e: any) {
+      // Fallback: simple keyword routing without AI
+      const lastMsg = (messages[messages.length - 1]?.content || '').toLowerCase();
+      let fallback = { message: "I'm having trouble right now. Use the navigation on the left to find what you need!", action: undefined as any };
+      if (lastMsg.includes('agent') || lastMsg.includes('bot') || lastMsg.includes('create')) {
+        fallback = { message: "Start by creating a new agent! Pick a template or build from scratch.", action: { label: "Create Agent", path: "/dashboard/agents/new" } };
+      } else if (lastMsg.includes('telegram') || lastMsg.includes('connect') || lastMsg.includes('sms') || lastMsg.includes('discord')) {
+        fallback = { message: "Connect your channels in Integrations — Telegram, SMS, Discord and more.", action: { label: "Go to Integrations", path: "/dashboard/integrations" } };
+      } else if (lastMsg.includes('broadcast') || lastMsg.includes('message') || lastMsg.includes('send')) {
+        fallback = { message: "Use Broadcasts to send a message to all your leads at once.", action: { label: "Go to Broadcasts", path: "/dashboard/broadcasts" } };
+      } else if (lastMsg.includes('analytic') || lastMsg.includes('stat') || lastMsg.includes('performance')) {
+        fallback = { message: "Check Analytics for performance charts and message volume.", action: { label: "View Analytics", path: "/dashboard/analytics" } };
+      }
+      res.json({ content: JSON.stringify(fallback) });
+    }
+  });
+
   // Admin promote endpoint
   app.post('/api/admin/promote', (req: any, res: any) => {
     const { secret, email } = req.body;
