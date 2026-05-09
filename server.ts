@@ -11,7 +11,6 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { GoogleGenAI } from '@google/genai';
 import path from 'path';
-import { existsSync, mkdirSync, unlinkSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -302,10 +301,10 @@ type DBSchema = {
 const ADMIN_EMAIL = 'zbienstock@gmail.com';
 
 const PLANS: Record<string, { agents: number; messagesPerMonth: number; messagesPerDay: number; integrations: number; allowedModels: string[]; maxTokens: number; price: number }> = {
-  free:     { agents: 1,         messagesPerMonth: 500,       messagesPerDay: 20,     integrations: 2,   allowedModels: ['claude-haiku-4-5'], maxTokens: 512,  price: 0  },
-  pro:      { agents: 5,         messagesPerMonth: 5000,      messagesPerDay: 200,    integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'gpt-4o-mini'], maxTokens: 1024, price: 29 },
-  business: { agents: 999,       messagesPerMonth: 25000,     messagesPerDay: 1000,   integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 2048, price: 79 },
-  admin:    { agents: 999999,    messagesPerMonth: 999999999, messagesPerDay: 999999, integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 8192, price: 0 },
+  free:     { agents: 1,   messagesPerMonth: 500,   messagesPerDay: 20,   integrations: 2,   allowedModels: ['claude-haiku-4-5'], maxTokens: 512,  price: 0  },
+  pro:      { agents: 5,   messagesPerMonth: 5000,  messagesPerDay: 200,  integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'gpt-4o-mini'], maxTokens: 1024, price: 29 },
+  admin:    { agents: 999999, messagesPerMonth: 999999999, messagesPerDay: 999999, integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 8192, price: 0 },
+  business: { agents: 999, messagesPerMonth: 25000, messagesPerDay: 1000, integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 2048, price: 79 },
 };
 
 // Backward compat for code that used PLAN_LIMITS
@@ -314,7 +313,6 @@ const PLAN_LIMITS = Object.fromEntries(
 );
 
 function getEffectiveModel(user: User, requestedModel: string): string {
-  // Admin gets unrestricted model access
   if (user.plan === 'admin' || user.email === ADMIN_EMAIL) return requestedModel;
   const plan = PLANS[user.plan] || PLANS.free;
   if (plan.allowedModels.includes(requestedModel)) return requestedModel;
@@ -357,7 +355,6 @@ function adminAuth(req: any, res: any, next: any) {
 }
 
 function checkLimit(user: User, type: 'agents' | 'messages') {
-  // Admin has no limits
   if (user.plan === 'admin' || user.email === ADMIN_EMAIL) return true;
   const limits = PLAN_LIMITS[user.plan] || PLAN_LIMITS.free;
   if (type === 'agents') {
@@ -1317,15 +1314,13 @@ async function startServer() {
   const jsonPath = process.env.DATABASE_PATH?.replace('.db', '.json') || path.join(process.cwd(), 'dipperai.json');
   await migrateFromJSON(jsonPath, db);
 
-  // Auto-promote admin email to admin plan on every startup
+  // Auto-promote admin on startup
   {
     const adminUser = db.data.users.find((u: any) => u.email === ADMIN_EMAIL);
     if (adminUser && adminUser.plan !== 'admin') {
       adminUser.plan = 'admin';
       db.write();
-      console.log('[admin] Auto-promoted', ADMIN_EMAIL, 'to admin plan');
-    } else if (adminUser) {
-      console.log('[admin]', ADMIN_EMAIL, 'already on admin plan');
+      console.log('[admin] Promoted', ADMIN_EMAIL, 'to admin plan');
     }
   }
 
@@ -4171,9 +4166,9 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   });
 
   // ─── Agent Health Monitoring ──────────────────────────────────────────────
-  app.get('/api/agents/health', auth, async (req: any, res) => {
+  app.get('/api/agents/health', requireAuth, async (req: any, res) => {
     try {
-      // db is already available as global
+      const db = await getDb();
       const agents = db.data.agents.filter((a: Agent) => a.user_id === req.user.id);
       const now = Date.now();
       const health = agents.map((agent: Agent) => {
@@ -4218,9 +4213,9 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   });
 
   // ─── Agent Duplication ────────────────────────────────────────────────────
-  app.post('/api/agents/:id/duplicate', auth, async (req: any, res) => {
+  app.post('/api/agents/:id/duplicate', requireAuth, async (req: any, res) => {
     try {
-      // db is already available as global
+      const db = await getDb();
       const source = db.data.agents.find((a: Agent) => a.id === req.params.id && a.user_id === req.user.id);
       if (!source) return res.status(404).json({ error: 'Agent not found' });
       const newAgent: Agent = {
@@ -4243,9 +4238,9 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   });
 
   // ─── Conversation Search ──────────────────────────────────────────────────
-  app.get('/api/conversations/search', auth, async (req: any, res) => {
+  app.get('/api/conversations/search', requireAuth, async (req: any, res) => {
     try {
-      // db is already available as global
+      const db = await getDb();
       const { q = '', agent: agentId = '', channel = '', limit = '50', offset = '0' } = req.query as any;
       // Get user's agents
       const userAgentIds = new Set(
@@ -4299,9 +4294,9 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   });
 
   // ─── Export Endpoints ─────────────────────────────────────────────────────
-  app.get('/api/activity/export', auth, async (req: any, res) => {
+  app.get('/api/activity/export', requireAuth, async (req: any, res) => {
     try {
-      // db is already available as global
+      const db = await getDb();
       const logs = db.data.activityLogs.filter((l: ActivityLog) => l.user_id === req.user.id);
       const headers = ['id', 'agent_name', 'event_type', 'channel', 'summary', 'status', 'model_used', 'tokens_used', 'latency_ms', 'created_at'];
       const csvRows = [headers.join(',')];
@@ -4319,9 +4314,9 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     } catch (e: any) { res.status(500).json({ error: e?.message }); }
   });
 
-  app.get('/api/leads/export', auth, async (req: any, res) => {
+  app.get('/api/leads/export', requireAuth, async (req: any, res) => {
     try {
-      // db is already available as global
+      const db = await getDb();
       const leads = db.data.leads.filter((l: Lead) => l.user_id === req.user.id);
       const headers = ['id', 'display_name', 'email', 'phone', 'channel', 'stage', 'agent_name', 'message_count', 'tags', 'notes', 'deal_value', 'created_at', 'last_seen'];
       const csvRows = [headers.join(',')];
@@ -4491,7 +4486,7 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     app.use(sirv('dist', { single: true }));
   }
 
-  // ─── Admin: Force-promote ─────────────────────────────────────────────────
+  // Admin promote endpoint
   app.post('/api/admin/promote', (req: any, res: any) => {
     const { secret, email } = req.body;
     if (secret !== (process.env.ADMIN_SECRET || 'dipperai-admin-2024')) {
@@ -4505,7 +4500,7 @@ Now write a comprehensive final summary of what was accomplished, combining all 
     res.json({ success: true, message: targetEmail + ' is now admin' });
   });
 
-  app.listen(PORT, () => console.log('[DipperAI] Running on http://localhost:' + PORT));
+  app.listen(PORT, () => console.log(`[DipperAI] Running on http://localhost:${PORT}`));
 }
 
 startServer().catch(console.error);
