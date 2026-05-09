@@ -4550,18 +4550,7 @@ Now write a comprehensive final summary of what was accomplished, combining all 
             from: 'DipperAI <onboarding@resend.dev>',
             to: user.email,
             subject: 'Reset your DipperAI password',
-            html: `
-              <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#0a0a0f;color:#f0f4ff;padding:40px;border-radius:16px">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:32px">
-                  <div style="width:40px;height:40px;background:linear-gradient(135deg,#7c3aed,#6d28d9);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">⚡</div>
-                  <span style="font-size:20px;font-weight:700;color:#fff">DipperAI</span>
-                </div>
-                <h2 style="color:#fff;margin:0 0 12px">Reset your password</h2>
-                <p style="color:#8b9cc8;margin:0 0 28px;line-height:1.6">Click the button below to set a new password. This link expires in 1 hour.</p>
-                <a href="${resetUrl}" style="display:inline-block;background:linear-gradient(135deg,#7c3aed,#6d28d9);color:#fff;padding:14px 28px;border-radius:12px;text-decoration:none;font-weight:600;font-size:14px">Reset Password</a>
-                <p style="color:#4a5580;font-size:12px;margin-top:28px">If you didn't request this, you can safely ignore this email.</p>
-              </div>
-            `,
+            html: '<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:40px"><h2>Reset your DipperAI password</h2><p>Click the link below to set a new password. Expires in 1 hour.</p><p><a href="' + resetUrl + '" style="background:#7c3aed;color:#fff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:600">Reset Password</a></p><p style="color:#888;font-size:12px">If you did not request this, ignore this email.</p></div>',
           }),
         });
       } catch (e) {
