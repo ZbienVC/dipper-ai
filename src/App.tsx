@@ -30,6 +30,8 @@ const Reports = lazy(() => import('./pages/Reports'))
 const Onboarding = lazy(() => import('./pages/Onboarding'))
 const ConversationSearch = lazy(() => import('./pages/ConversationSearch'))
 const MediaAgent = lazy(() => import('./pages/MediaAgent'))
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
+const ResetPassword = lazy(() => import('./pages/ResetPassword'))
 
 function PageLoader() {
   return (
@@ -59,6 +61,8 @@ function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           {/* Protected dashboard routes */}
           <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
