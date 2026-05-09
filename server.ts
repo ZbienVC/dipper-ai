@@ -1362,6 +1362,31 @@ async function startServer() {
     }
   });
 
+  app.post('/api/auth/register', async (req, res) => {
+    try {
+      const { email, username, password } = req.body;
+      if (!email || !username || !password) return res.status(400).json({ error: 'Missing fields' });
+      if (findUserByEmail(email)) return res.status(409).json({ error: 'Email already taken' });
+      if (db.data.users.find(u => u.username === username)) return res.status(409).json({ error: 'Username already taken' });
+      const id = randomUUID();
+      const today = new Date().toISOString().split('T')[0];
+      const user: User = {
+        id, email: email.toLowerCase(), username, password_hash: await bcrypt.hash(password, 10),
+        plan: 'free', messages_today: 0, messages_reset_date: today,
+        tokens_used_today: 0, tokens_reset_date: today,
+        created_at: new Date().toISOString(),
+      };
+      db.data.users.push(user);
+      save();
+      const token = jwt.sign({ userId: id }, JWT_SECRET, { expiresIn: '30d' });
+      res.json({ token, user: { id, email: user.email, username, plan: 'free' } });
+    } catch (e: any) {
+      console.error('[register error]', e?.message);
+      res.status(500).json({ error: 'Registration failed: ' + (e?.message || 'Unknown error') });
+    }
+  });
+
+
   app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     const user = findUserByEmail(email || '');
