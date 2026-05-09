@@ -1308,10 +1308,15 @@ function startCronRunner() {
 async function startServer() {
   // Initialize DB
   // SQLite database (WAL mode — safe for concurrent access, no JSON corruption)
-  const sqlitePath = process.env.DATABASE_PATH || path.join(process.cwd(), 'dipperai.db');
+  // Use /app/data for persistent Railway volume, fallback to cwd for local dev
+  const dataDir = process.env.DATABASE_PATH
+    ? path.dirname(process.env.DATABASE_PATH)
+    : (existsSync('/app/data') ? '/app/data' : process.cwd());
+  if (!existsSync(dataDir)) { try { mkdirSync(dataDir, { recursive: true }); } catch {} }
+  const sqlitePath = process.env.DATABASE_PATH || path.join(dataDir, 'dipperai.db');
   db = createSQLiteDB(sqlitePath);
   // One-time migration from old JSON file if it exists
-  const jsonPath = process.env.DATABASE_PATH?.replace('.db', '.json') || path.join(process.cwd(), 'dipperai.json');
+  const jsonPath = process.env.DATABASE_PATH?.replace('.db', '.json') || path.join(dataDir, 'dipperai.json');
   await migrateFromJSON(jsonPath, db);
 
   // Auto-promote admin on startup
