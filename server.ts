@@ -1798,13 +1798,8 @@ async function startServer() {
         '\n\nIMPORTANT: Never output XML tags, function_call syntax, or technical markup. Never write <invoke>, <function_calls>, or TOOL: in your responses. The system detects your intent automatically. Just respond naturally and the right tools will be called for you.'
       : '';
 
-    // Inject last image description for conversational image context
-    const convCtx = db.data.conversations.find((c: any) => c.id === convId);
-    const lastImgDesc = (convCtx as any)?.last_image_description;
-    const imageContextAddition = lastImgDesc && !imageData
-      ? `\n\n## Image Context From This Conversation\nThe user previously shared an image in this conversation. Here is what it shows: "${lastImgDesc}"\nWhen the user refers to "this image", "this meme", "that image", or similar, they are referring to this image. Use this context to answer.`
-      : '';
-    const finalSystemPrompt = systemPromptWithMemory + toolSystemAddition + imageContextAddition;
+    // Image context comes through conversation history automatically (stored with user message)
+    const finalSystemPrompt = systemPromptWithMemory + toolSystemAddition;
 
     // First AI call - use vision API if imageData present
     let rawContent: string;
@@ -1835,11 +1830,6 @@ async function startServer() {
       rawContent = (visionResp.content[0] as any).text;
       tokensUsed = (visionResp.usage?.input_tokens || 0) + (visionResp.usage?.output_tokens || 0);
       console.log('[auth-chat] Vision response length:', rawContent.length);
-      // Store image description in conversation for future reference
-      const imgDesc = rawContent.slice(0, 500);
-      const convForImg = db.data.conversations.find((c: any) => c.id === convId);
-      if (convForImg) (convForImg as any).last_image_description = imgDesc;
-      save();
     } else {
       const aiRes = await callAI(activeProvider, effectiveModel, finalSystemPrompt, history, plan.maxTokens);
       rawContent = aiRes.text;
@@ -2932,7 +2922,11 @@ async function startServer() {
         aiResult = await callAI(activeProvider, effectiveModel, finalSystemPrompt + '\n\nSTRICT: 1-3 sentences max. No lists, dashes, bullets, headers or bold. Direct and conversational.', history, plan.maxTokens);
       }
       const { text: content, tokensUsed } = aiResult;
-      db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
+      // Store user message - if image was analyzed, append description to message text for future context
+      const userMsgContent = imageData && content
+        ? message + ` [IMAGE ANALYZED: ${content.slice(0, 300)}]`
+        : message;
+      db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: userMsgContent, created_at: new Date().toISOString() });
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: agent.model, created_at: new Date().toISOString() });
       agent.total_messages++;
       save();
