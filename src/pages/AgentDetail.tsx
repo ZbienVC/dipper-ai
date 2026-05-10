@@ -368,16 +368,34 @@ export default function AgentDetail() {
       if (token) {
         // Pre-compute base64 image data before fetch
         let precomputedImageData: string | undefined
-        if (uploadedFile?.localFile && uploadedFile.type.startsWith('image/')) {
+        const capturedFile = uploadedFile // capture before state changes
+        if (capturedFile?.localFile && capturedFile.type.startsWith('image/')) {
+          // Resize image to max 1024px and compress to JPEG for API
           precomputedImageData = await new Promise<string>((resolve) => {
-            const reader = new FileReader()
-            reader.onload = () => resolve(reader.result as string)
-            reader.readAsDataURL(uploadedFile.localFile!)
+            const img = new Image()
+            const objectUrl = URL.createObjectURL(capturedFile.localFile!)
+            img.onload = () => {
+              URL.revokeObjectURL(objectUrl)
+              const canvas = document.createElement('canvas')
+              const maxDim = 1024
+              let w = img.width, h = img.height
+              if (w > maxDim || h > maxDim) {
+                if (w > h) { h = Math.round(h * maxDim / w); w = maxDim }
+                else { w = Math.round(w * maxDim / h); h = maxDim }
+              }
+              canvas.width = w; canvas.height = h
+              const ctx = canvas.getContext('2d')!
+              ctx.drawImage(img, 0, 0, w, h)
+              resolve(canvas.toDataURL('image/jpeg', 0.85))
+            }
+            img.onerror = () => {
+              // Fallback: read raw file
+              const reader = new FileReader()
+              reader.onload = () => resolve(reader.result as string)
+              reader.readAsDataURL(capturedFile.localFile!)
+            }
+            img.src = objectUrl
           })
-          // Skip if too large (>400KB base64)
-          if (precomputedImageData && precomputedImageData.length > 550000) {
-            precomputedImageData = undefined
-          }
         }
         const res = await fetch(`/api/agents/${id}/chat`, {
           method: 'POST',
