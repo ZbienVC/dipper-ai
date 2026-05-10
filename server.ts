@@ -308,6 +308,21 @@ const PLANS: Record<string, { agents: number; messagesPerMonth: number; messages
   business: { agents: 999, messagesPerMonth: 25000, messagesPerDay: 1000, integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 2048, price: 79 },
 };
 
+  ,{
+    id: 'community-manager',
+    name: 'Community Manager',
+    emoji: '🏘️',
+    desc: 'Full Telegram community management, bots & verification',
+    systemPrompt: "You are a Telegram Community Manager Agent with full administrative capabilities. You manage Telegram communities, bots, verification systems, and engagement campaigns.\n\nYou can set up and configure Telegram bots (Heimdall verification, buy alerts, Rose-style moderation), manage members, send messages as the bot, create sticker packs, run engagement campaigns, and monitor community health.\n\nWhen someone wants to set up something new, ask for the specific context: token contract address, blockchain, community name/vibe, and any existing bot tokens. Then guide them step by step.\n\nFor buy bots, always confirm: 1) Token CA, 2) Chain (SOL/TON/ETH/BNB etc), 3) DEX screener link, 4) Minimum buy amount to alert, 5) Channel chat ID.\n\nFor verification setup: 1) Group chat ID, 2) Verification channel ID, 3) Challenge type (button/quiz/captcha), 4) Welcome message style.\n\nWrite conversationally, 2-3 sentences unless explaining steps. Sound like an experienced community builder who has done this hundreds of times.",
+    tools_enabled: ['web_search', 'send_notification', 'create_lead', 'webhook', 'search_knowledge_base'],
+  },{
+    id: 'buy-bot',
+    name: 'Buy Alert Bot',
+    emoji: '💰',
+    desc: 'Real-time on-chain buy alerts posted to Telegram',
+    systemPrompt: 'You are a Buy Alert Bot. Monitor blockchain transactions and post formatted buy alerts to Telegram when purchases happen. Format alerts with buyer amount, market cap, chart link. Be punchy and exciting - buy alerts should feel like wins.',
+    tools_enabled: ['send_notification', 'webhook', 'web_search'],
+  }
 // Backward compat for code that used PLAN_LIMITS
 const PLAN_LIMITS = Object.fromEntries(
   Object.entries(PLANS).map(([k, v]) => [k, { agents: v.agents, messagesPerDay: v.messagesPerDay, integrations: v.integrations }])
