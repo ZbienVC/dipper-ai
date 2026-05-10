@@ -543,7 +543,7 @@ export default function AgentDetail() {
           </p>
         </div>
         <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
-          className="w-full px-4 py-2.5 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm">
+          className="w-auto px-2 py-1 rounded-lg bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/40 text-white text-xs shrink-0" style={{ maxWidth: 155 }}>
           <optgroup label="── Anthropic Claude ──">
             <option value="claude-sonnet-4-5">Sonnet 3.5 👁 — Best default. Balanced speed, quality &amp; vision.</option>
             <option value="claude-haiku-4-5">Haiku 3 ⚡ — Fastest &amp; cheapest. High-volume text bots only.</option>
