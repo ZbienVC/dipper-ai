@@ -1796,8 +1796,40 @@ async function startServer() {
 
     const finalSystemPrompt = systemPromptWithMemory + toolSystemAddition;
 
-    // First AI call
-    let { text: rawContent, tokensUsed } = await callAI(activeProvider, effectiveModel, finalSystemPrompt, history, plan.maxTokens);
+    // First AI call - use vision API if imageData present
+    let rawContent: string;
+    let tokensUsed: number;
+    console.log('[auth-chat] imageData present:', !!imageData, 'length:', imageData?.length || 0, 'provider:', activeProvider, 'model:', effectiveModel);
+    if (imageData && activeProvider === 'anthropic') {
+      console.log('[auth-chat] USING VISION API');
+      const anthropicVisionClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const base64Data = imageData.replace(/^data:image\/[^;]+;base64,/, '');
+      const mimeMatch = imageData.match(/^data:(image\/[^;]+);/);
+      const mediaType = (mimeMatch?.[1] || 'image/jpeg') as any;
+      const lastMsg = history[history.length - 1];
+      const userText = (lastMsg?.content || '').replace(/\[.*?\]/g, '').trim() || 'Describe this image in detail.';
+      const visionMsgs = [
+        ...history.slice(0, -1).map((m: any) => ({ role: m.role as any, content: m.content })),
+        { role: 'user' as const, content: [
+          { type: 'image' as const, source: { type: 'base64' as const, media_type: mediaType, data: base64Data } },
+          { type: 'text' as const, text: userText }
+        ]}
+      ];
+      const visionModel = effectiveModel.includes('haiku') ? 'claude-sonnet-4-5' : effectiveModel;
+      const visionResp = await anthropicVisionClient.messages.create({
+        model: visionModel,
+        max_tokens: plan.maxTokens,
+        system: finalSystemPrompt + '\n\nSTRICT: 2-3 sentences max. No bullet points, no dashes, no markdown. Describe what you see conversationally.',
+        messages: visionMsgs,
+      });
+      rawContent = (visionResp.content[0] as any).text;
+      tokensUsed = (visionResp.usage?.input_tokens || 0) + (visionResp.usage?.output_tokens || 0);
+      console.log('[auth-chat] Vision response length:', rawContent.length);
+    } else {
+      const aiRes = await callAI(activeProvider, effectiveModel, finalSystemPrompt, history, plan.maxTokens);
+      rawContent = aiRes.text;
+      tokensUsed = aiRes.tokensUsed;
+    }
 
     // Parse and execute any tool calls in the response
     let content = rawContent;
