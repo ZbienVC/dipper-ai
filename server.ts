@@ -457,7 +457,7 @@ function buildAgentSystemPrompt(agent: Agent, contextPrompt?: string): string {
   if (p.emoji_usage > 50) personalityParts.push('Use emojis naturally to add personality. 🎯');
   if (p.emoji_usage < 10) personalityParts.push('Avoid using emojis.');
   if (personalityParts.length > 0) {
-    parts.push('\n## Communication Style\n' + personalityParts.join(' '));
+    parts.push('\n## How you communicate\n' + personalityParts.join(' ') + '\n\nNever use bullet points or dashes. Write in natural paragraphs. Sound human.');
   }
 
   if (agent.knowledge_base && agent.knowledge_base.trim()) {
