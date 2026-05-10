@@ -532,11 +532,11 @@ export default function AgentDetail() {
       </div>
 
     <div className="flex flex-col h-[580px] bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
-      <div className="px-4 py-3 border-b border-[#1e1e2e] flex items-center gap-3">
+      <div className="px-4 py-3 border-b border-[#1e1e2e] flex items-center gap-3 min-w-0">
         <div className="w-8 h-8 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-sm">
           {agent?.emoji || <Bot size={14} className="text-violet-400" />}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 overflow-hidden">
           <p className="font-semibold text-white text-sm">{agent?.name}</p>
           <p className="text-xs text-green-400 font-medium flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" /> Online
