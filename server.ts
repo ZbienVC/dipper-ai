@@ -1931,8 +1931,8 @@ async function startServer() {
       const isFollowUp = history.filter(m => m.role === 'user').length > 1;
       recordAgentMetrics(agent.id, latency_ms, tokensUsed, sentiment, isFollowUp);
       // Update conversation last_message_at
-      const conv = db.data.conversations.find(c => c.id === convId);
-      if (conv) { conv.last_message_at = new Date().toISOString(); conv.followup_sent = false; }
+      const convMsg = db.data.conversations.find(c => c.id === convId);
+      if (convMsg) { convMsg.last_message_at = new Date().toISOString(); convMsg.followup_sent = false; }
       // Quality scoring
       const quality = scoreResponseQuality(content, message, 'web');
       if (quality.score < 70) console.log(`[quality] agent=${agent.id} score=${quality.score} flags=${quality.flags.join(',')}`);
