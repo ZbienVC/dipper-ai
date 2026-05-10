@@ -624,10 +624,9 @@ export default function AgentDetail() {
             <Send size={13} />
           </button>
         </div>
-        </div>
         {usageStats && (
           <p className="text-xs text-slate-600 mt-2 text-right">
-            {usageStats.messagesUsedToday}/{usageStats.messagesLimitToday} messages today
+            {usageStats.messagesUsedToday} / {usageStats.messagesLimitToday} messages today
           </p>
         )}
       </div>
