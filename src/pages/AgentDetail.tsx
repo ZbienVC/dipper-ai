@@ -534,7 +534,7 @@ export default function AgentDetail() {
           </p>
         </div>
         <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
-          className="w-full px-4 py-2.5 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm">
+          className="max-w-[200px] px-2 py-1 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm">
           <optgroup label="Anthropic Claude">
             <option value="claude-sonnet-4-5">Claude 3.5 Sonnet — Recommended (vision)</option>
             <option value="claude-haiku-4-5">Claude 3 Haiku — Fastest (text only)</option>
