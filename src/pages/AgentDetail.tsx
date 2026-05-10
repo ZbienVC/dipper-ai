@@ -364,20 +364,29 @@ export default function AgentDetail() {
     setThinking(true)
     try {
       let reply: string
+      // Convert image to base64 BEFORE the fetch (can't await inside JSON.stringify)
+      let imageData: string | undefined
+      if (uploadedFile?.localFile && uploadedFile.type.startsWith('image/')) {
+        imageData = await new Promise<string>((resolve) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result as string)
+          reader.readAsDataURL(uploadedFile.localFile!)
+        })
+        // Resize/compress if too large (>500KB base64 = ~375KB image)
+        if (imageData.length > 500000) {
+          // Just send the description, not the raw data for large images
+          imageData = undefined
+        }
+      }
       if (token) {
         const res = await fetch(`/api/agents/${id}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ 
-              message: currentInput + (uploadedFile ? `\n\n[Attached file: ${uploadedFile.name} (${uploadedFile.type})]` : ''),
+              message: currentInput + (uploadedFile ? `\n\n[User attached: ${uploadedFile.name}]` : ''),
               model: selectedModel,
-              imageData: uploadedFile?.localFile && uploadedFile.type.startsWith('image/') ? await (() => {
-                return new Promise<string>((resolve) => {
-                  const reader = new FileReader()
-                  reader.onload = () => resolve(reader.result as string)
-                  reader.readAsDataURL(uploadedFile.localFile!)
-                })
-              })() : undefined,
+              imageData,
+              imageName: uploadedFile?.name,
             }),
         })
         const data = await res.json()
