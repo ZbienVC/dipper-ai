@@ -488,13 +488,21 @@ async function callAI(provider: string, model: string, systemPrompt: string, mes
 
 // Strip leaked tool call XML and clean up response for display
 function cleanAgentResponse(text: string): string {
-  // Remove any XML/function_call tags that leaked into output
   let clean = text
+    // Strip XML/function_call leakage
     .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '')
     .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
-    .replace(/<parameter[\s\S]*?<\/antml:parameter>/g, '')
-    .replace(/<[^>]+>/g, '') // strip any remaining XML tags
-    .replace(/TOOL:\w+\([^)]*\)/g, '') // strip our own TOOL: markers if leaked
+    .replace(/<[^>]+>/g, '')
+    .replace(/TOOL:\w+\([^)]*\)/g, '')
+    // Strip markdown formatting that renders poorly in plain text chat
+    .replace(/^#{1,6}\s+/gm, '')         // Remove # headers
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // Remove **bold**
+    .replace(/\*([^*]+)\*/g, '$1')       // Remove *italic*
+    .replace(/^[\-\*\+]\s+/gm, '')     // Remove bullet dashes
+    .replace(/^\d+\.\s+/gm, '')         // Remove numbered lists
+    .replace(/_{1,2}([^_]+)_{1,2}/g, '$1') // Remove _underline_
+    .replace(/```[^]*?```/g, '')    // Remove code blocks
+    .replace(/`([^`]+)`/g, '$1')        // Remove inline code
     .trim();
   // Collapse multiple blank lines
   clean = clean.replace(/\n{3,}/g, '\n\n').trim();
