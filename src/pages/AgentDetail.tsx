@@ -34,6 +34,18 @@ function getToken() {
 
 const inputClass = "w-full px-4 py-2.5 rounded-xl bg-white/5 border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white placeholder-slate-600 text-sm transition-all"
 
+
+function renderMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer" style="color:#a78bfa;text-decoration:underline">$1</a>')
+    .replace(/https?:\/\/[^\s<>]+\.(png|jpg|jpeg|gif|webp)/gi, '<br/><img src="export default function AgentDetail" style="max-width:100%;border-radius:8px;margin-top:8px" />')
+    .replace(/https?:\/\/[^\s<>"]+/g, '<a href="export default function AgentDetail" target="_blank" rel="noreferrer" style="color:#a78bfa;text-decoration:underline">export default function AgentDetail</a>')
+    .replace(/\n\n/g, '<br/><br/>')
+    .replace(/\n/g, '<br/>');
+}
+
 export default function AgentDetail() {
   const { id = '' } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
