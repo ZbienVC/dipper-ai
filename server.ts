@@ -3038,6 +3038,43 @@ async function startServer() {
       }
 
       const msg = update?.message || update?.channel_post;
+
+      // Handle photo messages with vision API before text-only check
+      if (msg?.photo?.length > 0 && process.env.ANTHROPIC_API_KEY) {
+        const phChatId = msg.chat?.id;
+        const phCaption = msg.caption || 'Describe what you see in this image.';
+        const phIntg = db.data.integrations.find(i => i.user_id === agent.user_id && i.type === 'telegram' && i.connected);
+        if (phIntg && phChatId) {
+          const { botToken: phTok } = decodeCredentials(phIntg.credentials);
+          if (phTok) {
+            try {
+              const photo = msg.photo[msg.photo.length - 1];
+              const phFr = await fetch('https://api.telegram.org/bot' + phTok + '/getFile?file_id=' + photo.file_id);
+              const phFd: any = await phFr.json();
+              const phFUrl = 'https://api.telegram.org/file/bot' + phTok + '/' + phFd.result?.file_path;
+              const phImg = Buffer.from(await (await fetch(phFUrl)).arrayBuffer());
+              const phAnt = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+              const phVr = await phAnt.messages.create({
+                model: 'claude-sonnet-4-5', max_tokens: 400,
+                system: buildAgentSystemPrompt(agent as Agent) + '\n\nSTRICT: 2-3 sentences. No lists.',
+                messages: [{ role: 'user', content: [
+                  { type: 'image', source: { type: 'base64', media_type: 'image/jpeg' as any, data: phImg.toString('base64') } },
+                  { type: 'text', text: phCaption }
+                ]}]
+              });
+              await sendTelegramMessage(phTok, phChatId, (phVr.content[0] as any).text);
+            } catch (phErr) {
+              console.error('[tg-photo]', phErr);
+              const phFallback = db.data.integrations.find(i => i.user_id === agent.user_id && i.type === 'telegram' && i.connected);
+              if (phFallback) {
+                const { botToken: fbt } = decodeCredentials(phFallback.credentials);
+                if (fbt && phChatId) await sendTelegramMessage(fbt, phChatId, 'I see your image! Tell me what you would like to do with it.');
+              }
+            }
+          }
+        }
+        return;
+      }
       if (!msg?.text) return;
       if (msg.from?.is_bot) return;
 
