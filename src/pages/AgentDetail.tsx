@@ -10,19 +10,21 @@ import {
 
 function MsgText({ text }: { text: string }) {
   const [exp, setExp] = useState(false)
-  const long = text.length > 300
+  const isLong = text.length > 280
+  const display = isLong && !exp ? text.slice(0, 260) + '...' : text
   return (
     <div style={{ wordBreak: 'break-word' }}>
-      <span style={{ whiteSpace: 'pre-wrap' }}>{long && !exp ? text.slice(0, 280) + '...' : text}</span>
-      {long && (
+      <span style={{ whiteSpace: 'pre-wrap' }}>{display}</span>
+      {isLong && (
         <button onClick={() => setExp(e => !e)}
           style={{ display: 'block', marginTop: 4, fontSize: 11, color: '#a78bfa', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
-          {exp ? 'Show less ↑' : 'Read more ↓'}
+          {exp ? 'Show less' : 'Read more'}
         </button>
       )}
     </div>
   )
 }
+
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Activity },
@@ -89,12 +91,10 @@ export default function AgentDetail() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadedFile, setUploadedFile] = useState<{ url: string; name: string; type: string; localFile?: File } | null>(null)
 
-  const handleFileUpload = async (file: File) => {
+  const handleFileUpload = (file: File) => {
     const localUrl = URL.createObjectURL(file)
     setUploadedFile({ url: localUrl, name: file.name, type: file.type, localFile: file })
-    if (file.type.startsWith('image/')) {
-      setInputText(prev => prev || 'Analyze this image and help me create stickers or content from it.')
-    }
+    setInputText('Analyze this image. Describe exactly what you see.')
   }
   const [urlInput, setUrlInput] = useState('')
   const [knowledgeDragOver, setKnowledgeDragOver] = useState(false)
@@ -357,8 +357,8 @@ export default function AgentDetail() {
 
   const sendMessage = async () => {
     if ((!inputText.trim() && !uploadedFile) || thinking || !agent) return
-    const userMsg: ChatMsg = { role: 'user', text: (inputText.trim() || 'Analyze this image') + (uploadedFile ? ' 📎' : ''), ts: getTime() }
-    const currentInput = inputText.trim() || (uploadedFile ? 'Analyze this image. What do you see? Describe it in detail then suggest sticker and content ideas.' : '')
+    const userMsg: ChatMsg = { role: 'user', text: inputText.trim(), ts: getTime() }
+    const currentInput = inputText.trim()
     const token = getToken()
     setMessages(prev => [...prev, userMsg])
     setInputText('')
@@ -366,46 +366,43 @@ export default function AgentDetail() {
     try {
       let reply: string
       if (token) {
-        // Pre-compute base64 image data before fetch
-        let precomputedImageData: string | undefined
-        const capturedFile = uploadedFile // capture before state changes
-        if (capturedFile?.localFile && capturedFile.type.startsWith('image/')) {
-          // Resize image to max 1024px and compress to JPEG for API
-          precomputedImageData = await new Promise<string>((resolve) => {
-            const img = new Image()
-            const objectUrl = URL.createObjectURL(capturedFile.localFile!)
-            img.onload = () => {
-              URL.revokeObjectURL(objectUrl)
-              const canvas = document.createElement('canvas')
-              const maxDim = 1024
-              let w = img.width, h = img.height
-              if (w > maxDim || h > maxDim) {
-                if (w > h) { h = Math.round(h * maxDim / w); w = maxDim }
-                else { w = Math.round(w * maxDim / h); h = maxDim }
-              }
-              canvas.width = w; canvas.height = h
-              const ctx = canvas.getContext('2d')!
-              ctx.drawImage(img, 0, 0, w, h)
-              resolve(canvas.toDataURL('image/jpeg', 0.85))
-            }
-            img.onerror = () => {
-              // Fallback: read raw file
-              const reader = new FileReader()
-              reader.onload = () => resolve(reader.result as string)
-              reader.readAsDataURL(capturedFile.localFile!)
-            }
-            img.src = objectUrl
-          })
-        }
         const res = await fetch(`/api/agents/${id}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: (() => JSON.stringify({ 
-              message: currentInput + (uploadedFile ? `\n[Attached: ${uploadedFile.name}]` : ''),
-              model: selectedModel,
-              imageData: precomputedImageData,
-              imageName: uploadedFile?.name,
-            }))(),
+          body: await (async () => {
+              let imgData: string | undefined
+              const f = uploadedFile?.localFile
+              if (f && f.type.startsWith('image/')) {
+                imgData = await new Promise<string>(resolve => {
+                  const canvas = document.createElement('canvas')
+                  const img = new Image()
+                  const url = URL.createObjectURL(f)
+                  img.onload = () => {
+                    URL.revokeObjectURL(url)
+                    const max = 1024
+                    let w = img.width, h = img.height
+                    if (w > max) { h = Math.round(h * max / w); w = max }
+                    if (h > max) { w = Math.round(w * max / h); h = max }
+                    canvas.width = w; canvas.height = h
+                    canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
+                    resolve(canvas.toDataURL('image/jpeg', 0.82))
+                  }
+                  img.onerror = () => {
+                    URL.revokeObjectURL(url)
+                    const r = new FileReader()
+                    r.onload = () => resolve(r.result as string)
+                    r.readAsDataURL(f)
+                  }
+                  img.src = url
+                })
+              }
+              return JSON.stringify({
+                message: currentInput + (uploadedFile ? ' [image attached]' : ''),
+                model: selectedModel,
+                imageData: imgData,
+                imageName: uploadedFile?.name,
+              })
+            })(),
         })
         const data = await res.json()
         reply = data.content || data.error || 'Something went wrong.'
@@ -539,12 +536,12 @@ export default function AgentDetail() {
         <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
           className="w-full px-4 py-2.5 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm">
           <optgroup label="Anthropic Claude">
-            <option value="claude-sonnet-4-5">Claude 3.5 Sonnet — Recommended 👁 Vision</option>
+            <option value="claude-sonnet-4-5">Claude 3.5 Sonnet — Recommended (vision)</option>
             <option value="claude-haiku-4-5">Claude 3 Haiku — Fastest (text only)</option>
-            <option value="claude-opus-4-5">Claude Opus — Most powerful 👁 Vision</option>
+            <option value="claude-opus-4-5">Claude Opus — Most powerful (vision)</option>
           </optgroup>
           <optgroup label="OpenAI GPT">
-            <option value="gpt-4o">GPT-4o — Great for images 👁 Vision</option>
+            <option value="gpt-4o">GPT-4o — Great for images (vision)</option>
             <option value="gpt-4o-mini">GPT-4o Mini — Affordable (text only)</option>
           </optgroup>
           <optgroup label="Google Gemini">
@@ -602,21 +599,21 @@ export default function AgentDetail() {
         <input ref={fileInputRef} type="file" className="hidden" accept="image/*,video/*,.gif"
           onChange={e => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
         {uploadedFile && (
-          <div className="mb-2 p-2 rounded-xl bg-violet-500/8 border border-violet-500/25 flex items-center gap-3">
+          <div className="mb-2 p-2 rounded-xl flex items-center gap-3 border border-violet-500/25 bg-violet-500/8">
             {uploadedFile.type.startsWith('image/') && (
               <img src={uploadedFile.url} alt="" className="w-12 h-12 object-cover rounded-lg border border-violet-500/30 flex-shrink-0" />
             )}
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-violet-300">Image attached — agent will analyze it</div>
+              <div className="text-xs font-semibold text-violet-300">Image ready for analysis</div>
               <div className="text-xs text-slate-500 truncate">{uploadedFile.name}</div>
             </div>
-            <button onClick={() => setUploadedFile(null)} className="text-slate-500 hover:text-red-400"><X size={12} /></button>
+            <button onClick={() => setUploadedFile(null)} className="text-slate-500 hover:text-red-400 transition-colors"><X size={12} /></button>
           </div>
         )}
         <div className="flex gap-2 items-center">
           <button onClick={() => fileInputRef.current?.click()}
-            className="w-8 h-8 rounded-xl flex items-center justify-center bg-white/4 border border-white/8 text-slate-500 hover:text-violet-400 hover:border-violet-500/30 transition-all flex-shrink-0"
-            title="Attach image or file">
+            className="w-8 h-8 rounded-xl flex items-center justify-center bg-white/4 border border-white/8 text-slate-400 hover:text-violet-400 hover:border-violet-500/30 transition-all flex-shrink-0"
+            title="Attach image">
             <Paperclip size={13} />
           </button>
           <input value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()}
