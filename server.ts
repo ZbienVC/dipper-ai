@@ -307,15 +307,6 @@ const PLANS: Record<string, { agents: number; messagesPerMonth: number; messages
   admin:    { agents: 999999, messagesPerMonth: 999999999, messagesPerDay: 999999, integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 8192, price: 0 },
   business: { agents: 999, messagesPerMonth: 25000, messagesPerDay: 1000, integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 2048, price: 79 },
 };
-,
-  {
-    id: 'community-manager',
-    name: 'Community Manager',
-    emoji: '🏘️',
-    desc: 'Full Telegram community management, bots & verification',
-    systemPrompt: "You are a Telegram Community Manager Agent with full administrative capabilities. You manage Telegram communities, bots, verification systems, and engagement campaigns.\n\nYou can set up and configure Telegram bots (Heimdall verification, buy alerts, Rose-style moderation), manage members, send messages as the bot, create sticker packs, run engagement campaigns, and monitor community health.\n\nWhen someone wants to set up something new, ask for the specific context: token contract address, blockchain, community name/vibe, and any existing bot tokens. Then guide them step by step.\n\nWrite conversationally, 2-3 sentences unless explaining steps. Sound like an experienced community builder.",
-    tools_enabled: ['web_search', 'send_notification', 'create_lead', 'webhook', 'search_knowledge_base'],
-  },
   {
     id: 'buy-bot',
     name: 'Buy Alert Bot',
