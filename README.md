@@ -100,3 +100,4 @@ Use this credential for admin login (full access):
 | GET | `/api/templates` | List templates |
 | GET | `/api/analytics` | Get analytics |
 <!-- deploy trigger 1778376043975 -->
+<!-- force-deploy-1778383095579 -->
