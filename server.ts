@@ -1839,6 +1839,30 @@ async function startServer() {
 
     // Parse and execute any tool calls in the response
     let content = rawContent;
+
+    // Keyword intent detection - auto-fire tools based on message keywords
+    const msgL = message.toLowerCase();
+    if (agentTools.includes('generate_image') && !imageData &&
+        (msgL.includes('generat') || msgL.includes('creat') || msgL.includes('draw') || msgL.includes('make') || msgL.includes('design')) &&
+        (msgL.includes('image') || msgL.includes('sticker') || msgL.includes('meme') || msgL.includes('picture') || msgL.includes('logo') || msgL.includes('illustration'))) {
+      try {
+        const genUrl = await generateImage(message.slice(0, 400));
+        if (genUrl.startsWith('http')) content = rawContent + '\n\n' + genUrl;
+      } catch (e) { console.error('[intent-img]', e); }
+    }
+    if (agentTools.includes('web_search') && !imageData &&
+        (msgL.includes('search') || msgL.includes('look up') || msgL.includes('find') || msgL.includes('research') || msgL.includes('latest') || msgL.includes('current') || msgL.includes('today'))) {
+      try {
+        const sr = await webSearch(message, 4);
+        if (sr && !sr.includes('unavailable')) {
+          const enriched = await callAI(activeProvider, effectiveModel, finalSystemPrompt,
+            [...history, { role: 'user' as const, content: 'Search results:\n\n' + sr + '\n\nAnswer the original question.' }],
+            plan.maxTokens);
+          content = enriched.text;
+        }
+      } catch (e) { console.error('[intent-search]', e); }
+    }
+
     if (agentTools.length > 0) {
       const toolCallPattern = /TOOL:(\w+)\(([^)]*)\)/g;
       let match;
