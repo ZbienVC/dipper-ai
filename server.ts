@@ -5367,6 +5367,23 @@ async function telegramStickerTool(
     const options = [
       { value: 'dipper', label: 'DipperAI (noreply)', from: 'DipperAI <onboarding@resend.dev>' },
       { value: 'zbienstock', label: user.email || 'Your Email', from: (user.email || 'zbienstock@gmail.com') + ' <' + (user.email || 'zbienstock@gmail.com') + '>' },
+  ,
+  {
+    id: 'community-manager',
+    name: 'Community Manager',
+    emoji: '🏘️',
+    desc: 'Full Telegram community management, bots & verification',
+    systemPrompt: "You are a Telegram Community Manager Agent with full administrative capabilities. You manage Telegram communities, bots, verification systems, and engagement campaigns. You can set up and configure Telegram bots (Heimdall verification, buy alerts, Rose-style moderation), manage members, send messages as the bot, create sticker packs, run engagement campaigns, and monitor community health. When someone wants to set up something new, ask for the specific context: token contract address, blockchain, community name/vibe, and any existing bot tokens. Then guide them step by step. Write conversationally, 2-3 sentences unless explaining steps.",
+    tools_enabled: ['web_search', 'send_notification', 'create_lead', 'webhook', 'search_knowledge_base'],
+  },
+  {
+    id: 'buy-bot',
+    name: 'Buy Alert Bot',
+    emoji: '💰',
+    desc: 'Real-time on-chain buy alerts posted to Telegram',
+    systemPrompt: 'You are a Buy Alert Bot. Monitor blockchain transactions and post formatted buy alerts to Telegram when purchases happen. Format alerts with buyer amount, market cap, chart link. Be punchy - buy alerts should feel like wins.',
+    tools_enabled: ['send_notification', 'webhook', 'web_search'],
+  }
     ];
     res.json({ options, current: (user as any).email_from_label || 'dipper' });
   });
