@@ -307,15 +307,6 @@ const PLANS: Record<string, { agents: number; messagesPerMonth: number; messages
   admin:    { agents: 999999, messagesPerMonth: 999999999, messagesPerDay: 999999, integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 8192, price: 0 },
   business: { agents: 999, messagesPerMonth: 25000, messagesPerDay: 1000, integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 2048, price: 79 },
 };
-
-  {
-    id: 'buy-bot',
-    name: 'Buy Alert Bot',
-    emoji: '💰',
-    desc: 'Real-time on-chain buy alerts posted to Telegram',
-    systemPrompt: 'You are a Buy Alert Bot. Monitor blockchain transactions and post buy alerts to Telegram. Format with buyer amount, market cap, chart link. Be punchy.',
-    tools_enabled: ['send_notification', 'webhook', 'web_search'],
-  }];
 // Backward compat for code that used PLAN_LIMITS
 const PLAN_LIMITS = Object.fromEntries(
   Object.entries(PLANS).map(([k, v]) => [k, { agents: v.agents, messagesPerDay: v.messagesPerDay, integrations: v.integrations }])
