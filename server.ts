@@ -2846,6 +2846,8 @@ async function startServer() {
       const systemPrompt = memCtx ? `${memCtx}\n\n${basePrompt}` : basePrompt;
       // Use vision API if image data present, otherwise standard callAI
       let aiResult: { text: string; tokensUsed: number };
+      // Vision-capable models: claude-sonnet, claude-opus, gpt-4o
+      const isVisionCapable = ['claude-sonnet-4-5','claude-opus-4-5','gpt-4o'].some(m => effectiveModel.includes(m.split('-')[0]));
       if (imageData && activeProvider === 'anthropic') {
         const anthropicVision = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
         const base64Data = imageData.replace(/^data:image\/[^;]+;base64,/, '');
