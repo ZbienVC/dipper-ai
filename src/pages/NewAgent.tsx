@@ -13,6 +13,14 @@ const TEMPLATES = [
   { id: 'lead-capture', name: 'Lead Capture', emoji: '🎯', desc: 'Capture & qualify leads', systemPrompt: 'You are a lead qualification specialist. You engage visitors, understand their needs, and capture contact info for follow-up.' },
   { id: 'personal-assistant', name: 'Personal Assistant', emoji: '✨', desc: 'Your AI personal assistant', systemPrompt: 'You are a highly capable personal assistant. You help with scheduling, research, writing, and organizing information. You are concise and proactive.' },
   { id: 'ecommerce', name: 'E-commerce Bot', emoji: '🛒', desc: 'Product & order support', systemPrompt: 'You are an e-commerce support specialist. You help customers find products, track orders, handle returns, and answer product questions accurately.' },
+  { id: 'research-agent', name: 'Research Agent', emoji: '🔬', desc: 'Deep research & fact-finding' },
+  { id: 'sales-outreach', name: 'Sales Outreach', emoji: '💰', desc: 'Lead outreach & deal closing' },
+  { id: 'content-creator', name: 'Content Creator', emoji: '✍️', desc: 'Posts, scripts & campaigns' },
+  { id: 'community-builder', name: 'Community Manager', emoji: '🌐', desc: 'Engage & grow community' },
+  { id: 'builder-assistant', name: 'Builder / Dev', emoji: '⚙️', desc: 'Code help & architecture' },
+  { id: 'crypto-advisor', name: 'Crypto Advisor', emoji: '🔷', desc: 'Web3 & market intelligence' },
+  { id: 'personal-assistant', name: 'Personal Assistant', emoji: '🧠', desc: 'Research, emails & tasks' },
+  { id: 'creative-director', name: 'Creative Director', emoji: '🎨', desc: 'Brand, visuals & campaigns' },
   { id: 'custom', name: 'Custom Agent', emoji: '🤖', desc: 'Start from scratch', systemPrompt: '' },
 ]
 
