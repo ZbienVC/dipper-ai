@@ -89,11 +89,38 @@ export default function AgentDetail() {
   const [thinking, setThinking] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [uploadedFile, setUploadedFile] = useState<{ url: string; name: string; type: string; localFile?: File } | null>(null)
+  const [uploadedFile, setUploadedFile] = useState<{ url: string; name: string; type: string; base64?: string } | null>(null)
 
-  const handleFileUpload = (file: File) => {
+  const handleFileUpload = async (file: File) => {
     const localUrl = URL.createObjectURL(file)
-    setUploadedFile({ url: localUrl, name: file.name, type: file.type, localFile: file })
+    // Convert to base64 NOW while we have the file, before any state changes
+    let base64: string | undefined
+    if (file.type.startsWith('image/')) {
+      base64 = await new Promise<string>((resolve) => {
+        const canvas = document.createElement('canvas')
+        const img = new Image()
+        const objUrl = URL.createObjectURL(file)
+        img.onload = () => {
+          URL.revokeObjectURL(objUrl)
+          const max = 1024
+          let w = img.width, h = img.height
+          if (w > max) { h = Math.round(h * max / w); w = max }
+          if (h > max) { w = Math.round(w * max / h); h = max }
+          canvas.width = w; canvas.height = h
+          canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
+          resolve(canvas.toDataURL('image/jpeg', 0.85))
+        }
+        img.onerror = () => {
+          URL.revokeObjectURL(objUrl)
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result as string)
+          reader.readAsDataURL(file)
+        }
+        img.src = objUrl
+      })
+      console.log('[upload] base64 ready, length:', base64?.length, 'starts:', base64?.slice(0, 30))
+    }
+    setUploadedFile({ url: localUrl, name: file.name, type: file.type, base64 })
     setInputText('Analyze this image. Describe exactly what you see.')
   }
   const [urlInput, setUrlInput] = useState('')
@@ -357,10 +384,11 @@ export default function AgentDetail() {
 
   const sendMessage = async () => {
     if ((!inputText.trim() && !uploadedFile) || thinking || !agent) return
-    // Capture file reference immediately before any state changes
-    const capturedFile = uploadedFile?.localFile || null
+    // base64 is pre-computed in state from handleFileUpload
+    const capturedBase64 = uploadedFile?.base64 || null
     const capturedFileName = uploadedFile?.name || ''
     const capturedFileType = uploadedFile?.type || ''
+    console.log('[send] base64 present:', !!capturedBase64, 'length:', capturedBase64?.length || 0)
     const userMsg: ChatMsg = { role: 'user', text: inputText.trim(), ts: getTime() }
     const currentInput = inputText.trim()
     const token = getToken()
@@ -373,35 +401,10 @@ export default function AgentDetail() {
         const res = await fetch(`/api/agents/${id}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: await (async () => {
-              let imgData: string | undefined
-              const f = capturedFile  // use captured ref, not state
-              console.log('[img-upload] file captured:', !!f, 'name:', capturedFileName, 'type:', capturedFileType)
-              if (f && capturedFileType.startsWith('image/')) {
-                imgData = await new Promise<string>(resolve => {
-                  const canvas = document.createElement('canvas')
-                  const img = new Image()
-                  const url = URL.createObjectURL(f)
-                  img.onload = () => {
-                    URL.revokeObjectURL(url)
-                    const max = 1024
-                    let w = img.width, h = img.height
-                    if (w > max) { h = Math.round(h * max / w); w = max }
-                    if (h > max) { w = Math.round(w * max / h); h = max }
-                    canvas.width = w; canvas.height = h
-                    canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
-                    resolve(canvas.toDataURL('image/jpeg', 0.82))
-                  }
-                  img.onerror = () => {
-                    URL.revokeObjectURL(url)
-                    const r = new FileReader()
-                    r.onload = () => resolve(r.result as string)
-                    r.readAsDataURL(f)
-                  }
-                  img.src = url
-                })
-              }
-              console.log('[img-upload] imgData length:', imgData?.length || 0, 'sending to server')
+          body: (() => {
+              // base64 already computed in handleFileUpload - just use it
+              const imgData = capturedBase64 || undefined
+              console.log('[send-fetch] imgData:', !!imgData, 'length:', imgData?.length || 0)
               return JSON.stringify({
                 message: currentInput,
                 model: selectedModel,
