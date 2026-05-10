@@ -1736,6 +1736,9 @@ async function startServer() {
       return res.status(429).json({ error: 'Daily message limit reached.' });
     const { message, conversationId, model: requestedModel, imageData } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
+    // DEBUG: log what we received
+    console.log('[chat] imageData present:', !!imageData, 'length:', imageData?.length || 0, 'starts:', imageData?.slice(0,30) || 'none');
+    console.log('[chat] model:', requestedModel, 'provider would be:', requestedModel?.startsWith('gpt') ? 'openai' : 'anthropic');
 
     // Sanitize model name — fix incomplete IDs
     const modelMap: Record<string, string> = {
@@ -2851,6 +2854,7 @@ async function startServer() {
       let aiResult: { text: string; tokensUsed: number };
       // Vision-capable models: claude-sonnet, claude-opus, gpt-4o
       const isVisionCapable = ['claude-sonnet-4-5','claude-opus-4-5','gpt-4o'].some(m => effectiveModel.includes(m.split('-')[0]));
+      console.log('[vision] check - imageData:', !!imageData, 'provider:', activeProvider, 'model:', effectiveModel);
       if (imageData && activeProvider === 'anthropic') {
         const anthropicVision = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
         const base64Data = imageData.replace(/^data:image\/[^;]+;base64,/, '');
