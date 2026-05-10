@@ -4515,6 +4515,148 @@ Now write a comprehensive final summary of what was accomplished, combining all 
   }
 
 
+
+// ─── Extended Tool Execution ───────────────────────────────────────────────────
+
+// Web Search: Brave API + DuckDuckGo fallback
+async function webSearch(query: string, numResults = 5): Promise<string> {
+  const braveKey = process.env.BRAVE_SEARCH_API_KEY;
+  if (braveKey) {
+    try {
+      const url = 'https://api.search.brave.com/res/v1/web/search?q=' + encodeURIComponent(query) + '&count=' + numResults;
+      const r = await fetch(url, { headers: { 'Accept': 'application/json', 'X-Subscription-Token': braveKey } });
+      if (r.ok) {
+        const d: any = await r.json();
+        const results = (d.web?.results || []).slice(0, numResults);
+        if (results.length) {
+          return results.map((r: any, i: number) =>
+            `${i+1}. **${r.title}**\n${r.description || ''}\nSource: ${r.url}`
+          ).join('\n\n');
+        }
+      }
+    } catch (e) { console.error('[search] Brave failed:', e); }
+  }
+
+  // DuckDuckGo fallback (instant answers API)
+  try {
+    const url = 'https://api.duckduckgo.com/?q=' + encodeURIComponent(query) + '&format=json&no_html=1&skip_disambig=1';
+    const r = await fetch(url, { headers: { 'User-Agent': 'DipperAI/1.0' } });
+    if (r.ok) {
+      const d: any = await r.json();
+      const parts: string[] = [];
+      if (d.AbstractText) parts.push('**Summary:** ' + d.AbstractText);
+      if (d.RelatedTopics?.length) {
+        const topics = d.RelatedTopics.slice(0, numResults)
+          .filter((t: any) => t.Text)
+          .map((t: any, i: number) => `${i+1}. ${t.Text}\n${t.FirstURL || ''}`);
+        parts.push(...topics);
+      }
+      if (parts.length) return parts.join('\n\n');
+    }
+  } catch (e) { console.error('[search] DuckDuckGo failed:', e); }
+
+  return 'Search unavailable. Add BRAVE_SEARCH_API_KEY to Railway environment for better results.';
+}
+
+// Image Generation: DALL-E 3 via OpenAI
+async function generateImage(prompt: string, size: '1024x1024' | '1792x1024' | '1024x1792' = '1024x1024'): Promise<string> {
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!openaiKey) return 'Image generation requires OPENAI_API_KEY with DALL-E access.';
+  try {
+    const r = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + openaiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'dall-e-3', prompt, n: 1, size, quality: 'standard' }),
+    });
+    const d: any = await r.json();
+    if (d.error) return 'Image generation error: ' + d.error.message;
+    const url = d.data?.[0]?.url;
+    if (url) return url;
+    return 'Image generation failed — no URL returned.';
+  } catch (e: any) {
+    return 'Image generation error: ' + e.message;
+  }
+}
+
+// Send Email via Resend
+async function sendEmailTool(to: string, subject: string, body: string, fromLabel: string = 'DipperAI'): Promise<string> {
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!resendKey) return 'Email sending requires RESEND_API_KEY. Add it to Railway environment variables.';
+  
+  const fromMap: Record<string, string> = {
+    'zbienstock': 'Zach Bienstock <zbienstock@gmail.com>',
+    'dipper': 'DipperAI <noreply@dipperai.app>',
+    'noreply': 'DipperAI <onboarding@resend.dev>',
+  };
+  const from = fromMap[fromLabel.toLowerCase()] || 'DipperAI <onboarding@resend.dev>';
+
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + resendKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from,
+        to: [to],
+        subject,
+        html: '<div style="font-family:sans-serif;max-width:600px;margin:0 auto">' + body.replace(/\n/g, '<br>') + '</div>',
+        text: body,
+      }),
+    });
+    const d: any = await r.json();
+    if (d.id) return 'Email sent successfully to ' + to + ' (ID: ' + d.id + ')';
+    return 'Email failed: ' + (d.message || JSON.stringify(d));
+  } catch (e: any) {
+    return 'Email error: ' + e.message;
+  }
+}
+
+// Telegram Sticker: send image as sticker or upload to sticker pack
+async function telegramStickerTool(
+  botToken: string,
+  chatId: string,
+  imageUrl: string,
+  action: 'send' | 'create_pack' | 'add_to_pack',
+  packName?: string,
+  packTitle?: string,
+  emoji: string = '🤖'
+): Promise<string> {
+  const base = 'https://api.telegram.org/bot' + botToken;
+  try {
+    if (action === 'send') {
+      // Send image as photo/sticker in chat
+      const r = await fetch(base + '/sendPhoto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, photo: imageUrl, caption: 'Here is your sticker image!' }),
+      });
+      const d: any = await r.json();
+      return d.ok ? 'Sticker image sent to chat!' : 'Send failed: ' + d.description;
+    }
+    if (action === 'create_pack' && packName && packTitle) {
+      // Get bot user ID first
+      const meR = await fetch(base + '/getMe');
+      const me: any = await meR.json();
+      const botId = me.result?.id;
+      const r = await fetch(base + '/createNewStickerSet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: parseInt(chatId),
+          name: packName + '_by_' + (me.result?.username || 'bot'),
+          title: packTitle,
+          stickers: [{ sticker: imageUrl, emoji_list: [emoji], format: 'static' }],
+          sticker_format: 'static',
+        }),
+      });
+      const d: any = await r.json();
+      return d.ok ? 'Sticker pack "' + packTitle + '" created!' : 'Pack creation failed: ' + d.description;
+    }
+    return 'Sticker action not recognized.';
+  } catch (e: any) {
+    return 'Sticker tool error: ' + e.message;
+  }
+}
+
   // ─── Forgot / Reset Password ───────────────────────────────────────────────
   // In-memory store for reset tokens (survives until restart; good enough for single instance)
   const passwordResetTokens = new Map<string, { userId: string; email: string; expiresAt: number }>();
@@ -4614,6 +4756,70 @@ Omit the action field if no specific navigation needed.`;
         fallback = { message: "Check Analytics for performance charts and message volume.", action: { label: "View Analytics", path: "/dashboard/analytics" } };
       }
       res.json({ content: JSON.stringify(fallback) });
+    }
+  });
+
+
+  // ─── Web Search ──────────────────────────────────────────────────────────────
+  app.post('/api/tools/search', auth, async (req: any, res: any) => {
+    const { query, num_results = 5 } = req.body;
+    if (!query) return res.status(400).json({ error: 'query required' });
+    const result = await webSearch(query, num_results);
+    res.json({ result });
+  });
+
+  // ─── Image Generation ─────────────────────────────────────────────────────────
+  app.post('/api/tools/generate-image', auth, async (req: any, res: any) => {
+    const { prompt, size = '1024x1024' } = req.body;
+    if (!prompt) return res.status(400).json({ error: 'prompt required' });
+    const url = await generateImage(prompt, size);
+    res.json({ url, is_image: url.startsWith('http') });
+  });
+
+  // ─── Send Email ───────────────────────────────────────────────────────────────
+  app.post('/api/tools/send-email', auth, async (req: any, res: any) => {
+    const { to, subject, body, from_label = 'dipper' } = req.body;
+    if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, body required' });
+    const result = await sendEmailTool(to, subject, body, from_label);
+    res.json({ result });
+  });
+
+  // ─── Telegram Sticker ─────────────────────────────────────────────────────────
+  app.post('/api/tools/telegram-sticker', auth, async (req: any, res: any) => {
+    const { agent_id, chat_id, image_url, action = 'send', pack_name, pack_title, emoji } = req.body;
+    if (!image_url) return res.status(400).json({ error: 'image_url required' });
+    const agent = db.data.agents.find((a: any) => a.id === agent_id && a.user_id === req.userId);
+    const botToken = agent?.deployed_telegram_token || process.env.TELEGRAM_BOT_TOKEN;
+    if (!botToken) return res.status(400).json({ error: 'No Telegram bot token configured for this agent' });
+    const result = await telegramStickerTool(botToken, chat_id || '', image_url, action, pack_name, pack_title, emoji);
+    res.json({ result });
+  });
+
+  // ─── Agent tool execution (extended) ─────────────────────────────────────────
+  app.post('/api/agents/:id/run-tool', auth, async (req: any, res: any) => {
+    const agent = findAgent(req.params.id, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { tool, params = {} } = req.body;
+    
+    const results: Record<string, () => Promise<any>> = {
+      web_search: async () => ({ result: await webSearch(params.query, params.num_results) }),
+      generate_image: async () => { const url = await generateImage(params.prompt, params.size); return { url, is_image: url.startsWith('http') }; },
+      send_email: async () => ({ result: await sendEmailTool(params.to, params.subject, params.body, params.from_label) }),
+      get_time: async () => ({ result: new Date().toLocaleString('en-US', { timeZone: params.timezone || 'America/New_York' }) }),
+      calculate: async () => {
+        try { const safe = (params.expression || '').replace(/[^0-9+\-*/.()%\s]/g, ''); return { result: String(eval(safe)) }; }
+        catch { return { result: 'Calculation error' }; }
+      },
+    };
+
+    const fn = results[tool];
+    if (!fn) return res.status(400).json({ error: 'Unknown tool: ' + tool });
+    try {
+      const result = await fn();
+      logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'tool_used', channel: 'api', summary: 'Tool used: ' + tool, status: 'success' });
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 
