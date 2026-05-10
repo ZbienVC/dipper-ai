@@ -536,16 +536,16 @@ export default function AgentDetail() {
         <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
           className="max-w-[200px] px-2 py-1 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm">
           <optgroup label="Anthropic Claude">
-            <option value="claude-sonnet-4-5">Claude 3.5 Sonnet — Recommended (vision)</option>
-            <option value="claude-haiku-4-5">Claude 3 Haiku — Fastest (text only)</option>
-            <option value="claude-opus-4-5">Claude Opus — Most powerful (vision)</option>
+            <option value="claude-sonnet-4-5">Sonnet 3.5 👁</option>
+            <option value="claude-haiku-4-5">Haiku (fast)</option>
+            <option value="claude-opus-4-5">Opus 👁</option>
           </optgroup>
           <optgroup label="OpenAI GPT">
-            <option value="gpt-4o">GPT-4o — Great for images (vision)</option>
-            <option value="gpt-4o-mini">GPT-4o Mini — Affordable (text only)</option>
+            <option value="gpt-4o">GPT-4o 👁</option>
+            <option value="gpt-4o-mini">GPT-4o Mini</option>
           </optgroup>
           <optgroup label="Google Gemini">
-            <option value="gemini-1.5-flash">Gemini 1.5 Flash — Fast (text only)</option>
+            <option value="gemini-1.5-flash">Gemini Flash</option>
           </optgroup>
         </select>
         <button
