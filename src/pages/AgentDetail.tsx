@@ -56,7 +56,7 @@ const TABS = {AGENT_MODELS.map(m => (
         )}
         <div ref={chatEndRef} />
       </div>
-      <div className="px-4 py-3 border-t border-[#1e1e2e] bg-[#111118]">
+      <div className="px-3 py-2 border-t border-[#1e1e2e] bg-[#111118]">
         <input ref={fileInputRef} type="file" className="hidden" accept="image/*,video/*,.gif,.pdf,.txt"
           onChange={e => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
         {uploadedFile && (
