@@ -25,11 +25,11 @@ const TABS = {AGENT_MODELS.map(m => (
                 {agent?.emoji || <Bot size={12} className="text-violet-400" />}
               </div>
             )}
-            <div className={`max-w-sm flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              <div className={`px-4 py-2.5 rounded-xl text-sm leading-relaxed ${
+            <div className={`max-w-[78%] flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div className={`px-3 py-2 rounded-xl text-sm leading-relaxed ${
                 msg.role === 'user' ? 'text-white rounded-br-sm bg-violet-600' : 'bg-[#16161f] text-slate-200 border border-[#1e1e2e] rounded-bl-sm'
               }`}>
-                {msg.text}
+                <MsgText text={msg.text} />
               </div>
               <span className="text-xs text-slate-600 px-1">{msg.ts}</span>
             </div>
