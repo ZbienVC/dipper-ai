@@ -4,21 +4,20 @@ import DashboardLayout from '../components/DashboardLayout'
 import {
   MessageSquare, BarChart2, Settings, BookOpen, Terminal,
   Plug, User, Activity, Edit3, Save, Circle, Send, Bot,
-  Upload, Link2, FileText, Plus, X, Check, Loader2, Globe, Copy, ExternalLink, ToggleLeft, ToggleRight, Paperclip, ImageIcon, Sticker,
+  Upload, Link2, FileText, Plus, X, Check, Loader2, Globe, Copy, ExternalLink, ToggleLeft, ToggleRight, Paperclip, ImageIcon,
   Users, Trash2, ChevronRight, Search, Database, AlertCircle, RefreshCw
 } from 'lucide-react'
-
 
 function MsgText({ text }: { text: string }) {
   const [exp, setExp] = useState(false)
   const long = text.length > 300
   return (
-    <div style={{ wordBreak: "break-word" }}>
-      <span>{long && !exp ? text.slice(0, 280) + "..." : text}</span>
+    <div style={{ wordBreak: 'break-word' }}>
+      <span style={{ whiteSpace: 'pre-wrap' }}>{long && !exp ? text.slice(0, 280) + '...' : text}</span>
       {long && (
         <button onClick={() => setExp(e => !e)}
-          style={{ display: "block", marginTop: 4, fontSize: 11, color: "#a78bfa", cursor: "pointer", background: "none", border: "none", padding: 0 }}>
-          {exp ? "Show less ↑" : "Read more ↓"}
+          style={{ display: 'block', marginTop: 4, fontSize: 11, color: '#a78bfa', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
+          {exp ? 'Show less ↑' : 'Read more ↓'}
         </button>
       )}
     </div>
@@ -26,6 +25,514 @@ function MsgText({ text }: { text: string }) {
 }
 
 const TABS = [
+  { id: 'overview', label: 'Overview', icon: Activity },
+  { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'users', label: 'Users', icon: Users },
+  { id: 'personality', label: 'Personality', icon: User },
+  { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
+  { id: 'commands', label: 'Commands', icon: Terminal },
+  { id: 'integrations', label: 'Integrations', icon: Plug },
+  { id: 'deploy', label: 'Deploy', icon: Globe },
+  { id: 'analytics', label: 'Analytics', icon: BarChart2 },
+  { id: 'settings', label: 'Settings', icon: Settings },
+]
+
+interface ChatMsg { role: 'user' | 'agent'; text: string; ts: string }
+interface Command { trigger: string; response: string; description?: string }
+
+function getTime() {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function getToken() {
+  try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
+}
+
+const inputClass = "w-full px-4 py-2.5 rounded-xl bg-white/5 border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white placeholder-slate-600 text-sm transition-all"
+
+export default function AgentDetail() {
+  const { id = '' } = useParams<{ id: string }>()
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+
+  const [agent, setAgent] = useState<any>(null)
+  const [agentLoading, setAgentLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
+
+  useEffect(() => {
+    const token = getToken()
+    if (!token) { setNotFound(true); setAgentLoading(false); return }
+    fetch(`/api/agents/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d) { setNotFound(true); }
+        else setAgent(d)
+      })
+      .catch(() => setNotFound(true))
+      .finally(() => setAgentLoading(false))
+  }, [id])
+
+  const initialTab = searchParams.get('tab') || 'overview'
+  const [activeTab, setActiveTab] = useState(initialTab)
+  const [editBio, setEditBio] = useState('')
+  const [editTone, setEditTone] = useState('Friendly')
+  const [editCommStyle, setEditCommStyle] = useState('Professional')
+  const [saved, setSaved] = useState(false)
+  const [selectedModel, setSelectedModel] = useState('claude-haiku-4-5')
+  const [editAdjectives, setEditAdjectives] = useState('')
+  const [editTopics, setEditTopics] = useState('')
+  const [editForbiddenWords, setEditForbiddenWords] = useState('')
+  const [messages, setMessages] = useState<ChatMsg[]>([])
+  const [inputText, setInputText] = useState('')
+  const [thinking, setThinking] = useState(false)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadedFile, setUploadedFile] = useState<{ url: string; name: string; type: string; localFile?: File } | null>(null)
+
+  const handleFileUpload = async (file: File) => {
+    const localUrl = URL.createObjectURL(file)
+    setUploadedFile({ url: localUrl, name: file.name, type: file.type, localFile: file })
+    if (file.type.startsWith('image/')) {
+      setInputText(prev => prev || 'Analyze this image and help me create stickers or content from it.')
+    }
+  }
+  const [urlInput, setUrlInput] = useState('')
+  const [knowledgeDragOver, setKnowledgeDragOver] = useState(false)
+  const [commands, setCommands] = useState<Command[]>([])
+  const [showAddCommand, setShowAddCommand] = useState(false)
+  const [newTrigger, setNewTrigger] = useState('')
+  const [newResponse, setNewResponse] = useState('')
+  const [newDescription, setNewDescription] = useState('')
+  const [integrationRecords, setIntegrationRecords] = useState<{ type: string; connected: boolean; bot_info?: string; agent_id?: string }[]>([])
+  const [usageStats, setUsageStats] = useState<{ messagesUsedToday: number; messagesLimitToday: number; allowedModels: string[] } | null>(null)
+  const [embedEnabled, setEmbedEnabled] = useState(false)
+  const [embedToggling, setEmbedToggling] = useState(false)
+  const [copiedKey, setCopiedKey] = useState('')
+
+  // Analytics/metrics state
+  const [metrics, setMetrics] = useState<any[]>([])
+  const [metricsLoading, setMetricsLoading] = useState(false)
+
+  // Always-on state
+  const [alwaysOn, setAlwaysOn] = useState(false)
+  const [alwaysOnToggling, setAlwaysOnToggling] = useState(false)
+
+  // Settings tab state
+  const [settingsName, setSettingsName] = useState('')
+  const [settingsDesc, setSettingsDesc] = useState('')
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsSaved, setSettingsSaved] = useState(false)
+  const [agentDeleteConfirm, setAgentDeleteConfirm] = useState(false)
+
+  // Memory/users state
+  const [memories, setMemories] = useState<any[]>([])
+  const [memoriesTotal, setMemoriesTotal] = useState(0)
+  const [memoriesLoading, setMemoriesLoading] = useState(false)
+  const [selectedMemory, setSelectedMemory] = useState<any>(null)
+  const [memoryDetail, setMemoryDetail] = useState<any>(null)
+  const [memoryDetailLoading, setMemoryDetailLoading] = useState(false)
+  const [clearAllConfirm, setClearAllConfirm] = useState(false)
+  const [deleteMemConfirm, setDeleteMemConfirm] = useState<string | null>(null)
+
+  // Knowledge base state
+  const [knowledgeSources, setKnowledgeSources] = useState<any[]>([])
+  const [knowledgeTotalChars, setKnowledgeTotalChars] = useState(0)
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false)
+  const [showAddKnowledge, setShowAddKnowledge] = useState(false)
+  const [knowledgeTab, setKnowledgeTab] = useState<'text' | 'url' | 'faq'>('text')
+  const [kbName, setKbName] = useState('')
+  const [kbTextContent, setKbTextContent] = useState('')
+  const [kbUrl, setKbUrl] = useState('')
+  const [kbFaqs, setKbFaqs] = useState<{ question: string; answer: string }[]>([{ question: '', answer: '' }])
+  const [kbAdding, setKbAdding] = useState(false)
+  const [kbAddError, setKbAddError] = useState('')
+  const [kbDeleteConfirm, setKbDeleteConfirm] = useState<string | null>(null)
+  const [kbSearchSource, setKbSearchSource] = useState<any>(null)
+  const [kbSearchQuery, setKbSearchQuery] = useState('')
+  const [kbSearchResults, setKbSearchResults] = useState<any[]>([])
+  const [kbSearching, setKbSearching] = useState(false)
+
+  // New capabilities state
+  const [capToolsEnabled, setCapToolsEnabled] = useState<string[]>([])
+  const [capAutoTranslate, setCapAutoTranslate] = useState(false)
+  const [capFollowupEnabled, setCapFollowupEnabled] = useState(false)
+  const [capFollowupDelayHours, setCapFollowupDelayHours] = useState(24)
+  const [capFollowupMessage, setCapFollowupMessage] = useState('')
+  const [capEscalateOnNeg, setCapEscalateOnNeg] = useState(false)
+  const [capEscalationNotify, setCapEscalationNotify] = useState('inapp')
+  const [capSaving, setCapSaving] = useState(false)
+  const [capSaved, setCapSaved] = useState(false)
+  // Tool integration config state
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [webhookSecret, setWebhookSecret] = useState('')
+  const [calendlyLink, setCalendlyLink] = useState('')
+  const [sheetsSpreadsheetId, setSheetsSpreadsheetId] = useState('')
+  const [sheetsRange, setSheetsRange] = useState('Sheet1!A:F')
+  const [stripeApiKey, setStripeApiKey] = useState('')
+  const [toolTestResult, setToolTestResult] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const token = getToken()
+    if (!token) return
+    fetch('/api/integrations', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then((d: any[]) => setIntegrationRecords(d))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const token = getToken()
+    if (!token) return
+    fetch('/api/usage', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then((d: any) => d && setUsageStats(d))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (agent) {
+      setEditBio(agent.system_prompt || '')
+      setEditTone('Friendly')
+      setEditCommStyle('Professional')
+      setSelectedModel(agent.model || 'claude-haiku-4-5')
+      setEditTopics(agent.description || '')
+      setMessages([{ role: 'agent', text: `Hey! I'm ${agent.name}. How can I help you today?`, ts: getTime() }])
+      setEmbedEnabled(!!agent.deployed_embed_enabled)
+      setAlwaysOn(!!agent.always_on)
+      setSettingsName(agent.name || '')
+      setSettingsDesc(agent.description || '')
+      // New capabilities
+      setCapToolsEnabled(agent.tools_enabled || [])
+      setCapAutoTranslate(!!agent.auto_translate)
+      setCapFollowupEnabled(!!agent.followup_enabled)
+      setCapFollowupDelayHours(agent.followup_delay_hours || 24)
+      setCapFollowupMessage(agent.followup_message || '')
+      setCapEscalateOnNeg(!!agent.escalate_on_negative)
+      setCapEscalationNotify(agent.escalation_notify || 'inapp')
+      // Tool integration config
+      setWebhookUrl((agent as any).webhook_url || '')
+      setWebhookSecret((agent as any).webhook_secret || '')
+      setCalendlyLink((agent as any).calendly_link || '')
+      setSheetsSpreadsheetId((agent as any).sheets_spreadsheet_id || '')
+      setSheetsRange((agent as any).sheets_range || 'Sheet1!A:F')
+      setStripeApiKey((agent as any).stripe_api_key || '')
+    }
+  }, [agent?.id])
+
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, thinking])
+  useEffect(() => { const tab = searchParams.get('tab'); if (tab) setActiveTab(tab) }, [searchParams])
+
+  // Load knowledge sources when knowledge tab is activated
+  const loadKnowledge = useCallback(() => {
+    if (!agent) return
+    const token = getToken()
+    if (!token) return
+    setKnowledgeLoading(true)
+    fetch(`/api/agents/${agent.id}/knowledge`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { sources: [], totalChars: 0 })
+      .then((d: any) => { setKnowledgeSources(d.sources || []); setKnowledgeTotalChars(d.totalChars || 0) })
+      .catch(() => {})
+      .finally(() => setKnowledgeLoading(false))
+  }, [agent?.id])
+
+  useEffect(() => {
+    if (activeTab === 'knowledge' && agent) loadKnowledge()
+  }, [activeTab, agent?.id])
+
+  // Poll for processing knowledge sources
+  useEffect(() => {
+    const hasProcessing = knowledgeSources.some(s => s.status === 'processing')
+    if (!hasProcessing) return
+    const interval = setInterval(loadKnowledge, 2000)
+    return () => clearInterval(interval)
+  }, [knowledgeSources, loadKnowledge])
+
+  // Load memories when users tab is activated
+  useEffect(() => {
+    if (activeTab === 'users' && agent) {
+      const token = getToken()
+      if (!token) return
+      setMemoriesLoading(true)
+      fetch(`/api/agents/${agent.id}/memories?limit=50&offset=0`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : { memories: [], total: 0 })
+        .then((d: any) => { setMemories(d.memories || []); setMemoriesTotal(d.total || 0) })
+        .catch(() => {})
+        .finally(() => setMemoriesLoading(false))
+    }
+  }, [activeTab, agent?.id])
+
+  // Load metrics when analytics tab is activated
+  useEffect(() => {
+    if (activeTab === 'analytics' && agent) {
+      const token = getToken()
+      if (!token) return
+      setMetricsLoading(true)
+      fetch(`/api/agents/${agent.id}/intelligence/metrics`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : [])
+        .then((d: any[]) => setMetrics(Array.isArray(d) ? d : []))
+        .catch(() => setMetrics([]))
+        .finally(() => setMetricsLoading(false))
+    }
+  }, [activeTab, agent?.id])
+
+  const toggleAlwaysOn = async () => {
+    const token = getToken()
+    if (!token || !agent) return
+    setAlwaysOnToggling(true)
+    try {
+      const res = await fetch(`/api/agents/${id}/always-on`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ always_on: !alwaysOn }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setAlwaysOn(!!updated.always_on)
+        setAgent((prev: any) => ({ ...prev, always_on: updated.always_on }))
+      }
+    } catch {}
+    setAlwaysOnToggling(false)
+  }
+
+  const handleSaveSettings = async () => {
+    const token = getToken()
+    if (!token || !agent) return
+    setSettingsSaving(true)
+    try {
+      const res = await fetch(`/api/agents/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: settingsName.trim(), description: settingsDesc.trim() }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setAgent(updated)
+        setSettingsSaved(true)
+        setTimeout(() => setSettingsSaved(false), 2000)
+      }
+    } catch {}
+    setSettingsSaving(false)
+  }
+
+  const handleSaveCapabilities = async () => {
+    const token = getToken()
+    if (!token || !agent) return
+    setCapSaving(true)
+    try {
+      const res = await fetch(`/api/agents/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          tools_enabled: capToolsEnabled,
+          auto_translate: capAutoTranslate,
+          followup_enabled: capFollowupEnabled,
+          followup_delay_hours: capFollowupDelayHours,
+          followup_message: capFollowupMessage,
+          escalate_on_negative: capEscalateOnNeg,
+          escalation_notify: capEscalationNotify,
+          webhook_url: webhookUrl,
+          webhook_secret: webhookSecret,
+          calendly_link: calendlyLink,
+          sheets_spreadsheet_id: sheetsSpreadsheetId,
+          sheets_range: sheetsRange,
+          stripe_api_key: stripeApiKey,
+        }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setAgent(updated)
+        setCapSaved(true)
+        setTimeout(() => setCapSaved(false), 2000)
+      }
+    } catch {}
+    setCapSaving(false)
+  }
+
+  const handleDeleteAgent = async () => {
+    const token = getToken()
+    if (!token) return
+    await fetch(`/api/agents/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => {})
+    navigate('/dashboard/agents')
+  }
+
+  const sendMessage = async () => {
+    if (!inputText.trim() || thinking || !agent) return
+    const userMsg: ChatMsg = { role: 'user', text: inputText.trim(), ts: getTime() }
+    const currentInput = inputText.trim()
+    const token = getToken()
+    setMessages(prev => [...prev, userMsg])
+    setInputText('')
+    setThinking(true)
+    try {
+      let reply: string
+      if (token) {
+        const res = await fetch(`/api/agents/${id}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: await (async () => {
+            let imageData: string | undefined
+            if (uploadedFile?.localFile && uploadedFile.type.startsWith('image/')) {
+              imageData = await new Promise<string>((resolve) => {
+                const reader = new FileReader()
+                reader.onload = () => resolve(reader.result as string)
+                reader.readAsDataURL(uploadedFile.localFile!)
+              })
+              if (imageData && imageData.length > 500000) imageData = undefined
+            }
+            return JSON.stringify({ 
+              message: currentInput + (uploadedFile ? `\n[Attached: ${uploadedFile.name}]` : ''),
+              model: selectedModel,
+              imageData,
+              imageName: uploadedFile?.name,
+            })
+          })(),
+        })
+        const data = await res.json()
+        reply = data.content || data.error || 'Something went wrong.'
+      } else {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentId: id, message: currentInput,
+            conversationHistory: messages, agentName: agent.name,
+            personality: { bio: editBio, adjectives: editAdjectives.split(',').map((s: string) => s.trim()).filter(Boolean), communicationStyle: editCommStyle },
+            model: selectedModel,
+          }),
+        })
+        const data = await res.json()
+        reply = data.reply || data.error || 'Something went wrong.'
+      }
+      setMessages(prev => [...prev, { role: 'agent', text: reply, ts: getTime() }])
+      setUploadedFile(null)
+    } catch {
+      setMessages(prev => [...prev, { role: 'agent', text: 'Sorry, I had trouble responding. Try again.', ts: getTime() }])
+    }
+    setThinking(false)
+  }
+
+  const handleSavePersonality = async () => {
+    const token = getToken()
+    if (token && agent) {
+      await fetch(`/api/agents/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ systemPrompt: editBio, model: selectedModel }),
+      }).catch(() => {})
+    }
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  const renderOverview = () => (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        {[
+          { label: 'Total Messages', value: (agent?.total_messages || 0).toLocaleString(), color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20' },
+          { label: 'Model', value: agent?.model || 'N/A', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
+          { label: 'Status', value: agent?.is_active ? 'Active' : 'Paused', color: agent?.is_active ? 'text-green-400' : 'text-slate-400', bg: agent?.is_active ? 'bg-green-500/10' : 'bg-slate-500/10', border: agent?.is_active ? 'border-green-500/20' : 'border-slate-500/20' },
+        ].map(s => (
+          <div key={s.label} className={`bg-[#111118] rounded-xl p-4 border ${s.border}`}>
+            <div className={`w-9 h-9 rounded-lg ${s.bg} flex items-center justify-center mb-3`}>
+              <Activity size={16} className={s.color} />
+            </div>
+            <p className={`text-lg font-bold ${s.color} truncate`}>{s.value}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Deploy Checklist */}
+      <div className="bg-[#111118] rounded-xl border border-[#1e1e2e] p-5">
+        <h3 className="font-semibold text-white mb-3 text-sm">Deploy Checklist</h3>
+        <div className="space-y-2">
+          {[
+            { label: 'System prompt configured', done: !!(agent?.system_prompt && agent.system_prompt.length > 10) },
+            { label: 'AI model selected', done: !!(agent?.model) },
+            { label: 'Channel connected', done: integrationRecords.some(r => r.connected && (r.agent_id === id || !r.agent_id)) },
+          ].map(item => (
+            <div key={item.label} className="flex items-center gap-3">
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${item.done ? 'bg-green-500/20 border border-green-500/30' : 'bg-slate-800 border border-slate-700'}`}>
+                {item.done ? <Check size={11} className="text-green-400" /> : <X size={11} className="text-slate-600" />}
+              </div>
+              <span className={`text-sm ${item.done ? 'text-slate-300' : 'text-slate-500'}`}>{item.label}</span>
+            </div>
+          ))}
+        </div>
+        {!integrationRecords.some(r => r.connected) && (
+          <button onClick={() => navigate('/dashboard/integrations')}
+            className="mt-4 gradient-btn px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5">
+            <Plug size={12} /> Connect a Channel
+          </button>
+        )}
+      </div>
+    </div>
+  )
+
+  const renderChat = () => {
+    const agentCategory = agent?.template_id || 'custom'
+    const sampleInputs: Record<string, string[]> = {
+      'customer-support': ['What are your business hours?', 'I need to return my order', 'My item arrived damaged', 'How long does shipping take?', 'Can you help me track my package?'],
+      'lead-gen': ['Tell me more about your services', 'How much does it cost?', 'Can I schedule a demo?', 'What makes you different from competitors?', 'Do you offer a free trial?'],
+      'sales': ['What plans do you offer?', 'Is there a discount for annual billing?', 'Can I see a case study?', "What's your refund policy?", 'How do I get started?'],
+      'community': ['How do I get verified?', "What are the community rules?", 'Who do I contact for help?', 'How do I share my work here?', 'Where do I introduce myself?'],
+      'custom': ['What can you help me with?', 'Tell me about yourself', 'How does this work?', 'What are your main features?', 'Give me an example of what you can do'],
+    }
+    const samples = sampleInputs[agentCategory] || sampleInputs['custom']
+
+    return (
+    <div className="space-y-3">
+      {memoriesTotal > 0 && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-violet-500/10 border border-violet-500/20 rounded-xl text-sm text-violet-300">
+          <span>💾</span>
+          <span>Memory active — this agent remembers past interactions</span>
+        </div>
+      )}
+
+      {/* Sample test messages */}
+      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4">
+        <p className="text-xs font-semibold text-slate-400 mb-2">🧪 Test with sample inputs</p>
+        <div className="flex flex-wrap gap-2">
+          {samples.map((sample, i) => (
+            <button
+              key={i}
+              onClick={() => { setInputText(sample) }}
+              className="px-3 py-1.5 rounded-lg text-xs border border-[#1e1e2e] text-slate-400 hover:border-violet-500/40 hover:text-violet-300 hover:bg-violet-500/5 transition-all"
+            >
+              {sample}
+            </button>
+          ))}
+        </div>
+      </div>
+
+    <div className="flex flex-col h-[580px] bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-[#1e1e2e] flex items-center gap-3">
+        <div className="w-8 h-8 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-sm">
+          {agent?.emoji || <Bot size={14} className="text-violet-400" />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-white text-sm">{agent?.name}</p>
+          <p className="text-xs text-green-400 font-medium flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" /> Online
+          </p>
+        </div>
+        <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
+          className="w-full px-4 py-2.5 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm">
+          <optgroup label="Anthropic Claude">
+            <option value="claude-sonnet-4-5">Claude 3.5 Sonnet — Recommended 👁 Vision</option>
+            <option value="claude-haiku-4-5">Claude 3 Haiku — Fastest (text only)</option>
+            <option value="claude-opus-4-5">Claude Opus — Most powerful 👁 Vision</option>
+          </optgroup>
+          <optgroup label="OpenAI GPT">
+            <option value="gpt-4o">GPT-4o — Great for images 👁 Vision</option>
+            <option value="gpt-4o-mini">GPT-4o Mini — Affordable (text only)</option>
+          </optgroup>
+          <optgroup label="Google Gemini">
+            <option value="gemini-1.5-flash">Gemini 1.5 Flash — Fast (text only)</option>
+          </optgroup>
+        </select>
+        <button
+          onClick={() => { const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); setMessages([{ role: 'agent', text: 'Conversation cleared. How can I help you?', ts: t }]); }}
           className="p-1.5 rounded-lg border border-[#1e1e2e] text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
           title="Clear conversation"
         >
@@ -40,8 +547,8 @@ const TABS = [
                 {agent?.emoji || <Bot size={12} className="text-violet-400" />}
               </div>
             )}
-            <div className={`max-w-[78%] flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              <div className={`px-3 py-2 rounded-xl text-sm leading-relaxed ${
+            <div className={`max-w-[80%] flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div className={`px-4 py-2.5 rounded-xl text-sm leading-relaxed ${
                 msg.role === 'user' ? 'text-white rounded-br-sm bg-violet-600' : 'bg-[#16161f] text-slate-200 border border-[#1e1e2e] rounded-bl-sm'
               }`}>
                 <MsgText text={msg.text} />
@@ -72,54 +579,34 @@ const TABS = [
         <div ref={chatEndRef} />
       </div>
       <div className="px-3 py-2 border-t border-[#1e1e2e] bg-[#111118]">
-        <input ref={fileInputRef} type="file" className="hidden" accept="image/*,video/*,.gif,.pdf,.txt"
+        <input ref={fileInputRef} type="file" className="hidden" accept="image/*,video/*,.gif"
           onChange={e => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
         {uploadedFile && (
-          <div className="mb-2 p-2 rounded-xl bg-violet-500/8 border border-violet-500/25">
-            {uploadedFile.type.startsWith('image/') ? (
-              <div className="flex items-start gap-3">
-                <img src={uploadedFile.url} alt={uploadedFile.name} 
-                  className="w-16 h-16 object-cover rounded-lg border border-violet-500/30 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-violet-300">Image attached</span>
-                    <button onClick={() => setUploadedFile(null)} className="text-slate-500 hover:text-red-400 transition-colors"><X size={12} /></button>
-                  </div>
-                  <span className="text-xs text-slate-500 block truncate mt-0.5">{uploadedFile.name}</span>
-                  <span className="text-xs text-violet-400 mt-1 block">Agent will analyze this image</span>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Paperclip size={14} className="text-violet-400" />
-                <span className="text-xs text-violet-300 flex-1 truncate">{uploadedFile.name}</span>
-                <button onClick={() => setUploadedFile(null)} className="text-slate-500 hover:text-white"><X size={12} /></button>
-              </div>
+          <div className="mb-2 p-2 rounded-xl bg-violet-500/8 border border-violet-500/25 flex items-center gap-3">
+            {uploadedFile.type.startsWith('image/') && (
+              <img src={uploadedFile.url} alt="" className="w-12 h-12 object-cover rounded-lg border border-violet-500/30 flex-shrink-0" />
             )}
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-semibold text-violet-300">Image attached — agent will analyze it</div>
+              <div className="text-xs text-slate-500 truncate">{uploadedFile.name}</div>
+            </div>
+            <button onClick={() => setUploadedFile(null)} className="text-slate-500 hover:text-red-400"><X size={12} /></button>
           </div>
         )}
-        {/* Sticker pack quick action */}
-        <div className="flex gap-1 mb-2 flex-wrap">
-          {['Create Telegram sticker pack', 'Generate sticker variations', 'Make animated sticker'].map(action => (
-            <button key={action} onClick={() => setInputText(action)}
-              className="text-xs px-2 py-1 rounded-lg bg-white/4 border border-white/8 text-slate-500 hover:text-violet-400 hover:border-violet-500/30 transition-all">
-              {action}
-            </button>
-          ))}
-        </div>
         <div className="flex gap-2 items-center">
-          <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-white/4 border border-white/8 text-slate-500 hover:text-violet-400 hover:border-violet-500/30 transition-all disabled:opacity-40"
+          <button onClick={() => fileInputRef.current?.click()}
+            className="w-8 h-8 rounded-xl flex items-center justify-center bg-white/4 border border-white/8 text-slate-500 hover:text-violet-400 hover:border-violet-500/30 transition-all flex-shrink-0"
             title="Attach image or file">
-            {uploading ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />}
+            <Paperclip size={13} />
           </button>
-          <input value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+          <input value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()}
             placeholder={`Message ${agent?.name || 'agent'}...`} disabled={thinking}
             className="flex-1 px-4 py-2 rounded-xl bg-white/5 border border-[#1e1e2e] text-sm focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-slate-200 placeholder-slate-600 transition-all disabled:opacity-50" />
           <button onClick={sendMessage} disabled={(!inputText.trim() && !uploadedFile) || thinking}
-            className="gradient-btn w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-40">
-            <Send size={14} />
+            className="gradient-btn w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-40">
+            <Send size={13} />
           </button>
+        </div>
         </div>
         {usageStats && (
           <p className="text-xs text-slate-600 mt-2 text-right">
@@ -163,17 +650,18 @@ const TABS = [
         <label className="block text-sm font-semibold text-slate-300 mb-2">AI Model</label>
         <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
           className="w-full px-4 py-2.5 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm">
-          <optgroup label="Anthropic Claude (Recommended)">
-            <option value="claude-sonnet-4-5">Claude 3.5 Sonnet — Best all-rounder 👁 Vision</option>
-            <option value="claude-haiku-4-5">Claude 3 Haiku — Fastest &amp; cheapest (text only)</option>
-            <option value="claude-opus-4-5">Claude Opus — Most powerful 👁 Vision</option>
-          </optgroup>
-          <optgroup label="OpenAI GPT">
-            <option value="gpt-4o">GPT-4o — Great for code &amp; images 👁 Vision</option>
-            <option value="gpt-4o-mini">GPT-4o Mini — Affordable (text only)</option>
-          </optgroup>
           <optgroup label="Google Gemini">
-            <option value="gemini-1.5-flash">Gemini 1.5 Flash — Fast &amp; affordable (text only)</option>
+            <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast)</option>
+            <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+          </optgroup>
+          <optgroup label="Anthropic">
+            <option value="claude-haiku-4-5">Claude 3.5 Haiku</option>
+            <option value="claude-sonnet-4-5">Claude 3.5 Sonnet</option>
+          </optgroup>
+          <optgroup label="OpenAI">
+            <option value="gpt-4o">GPT-4o</option>
+            <option value="gpt-4o-mini">GPT-4o Mini</option>
           </optgroup>
         </select>
       </div>
