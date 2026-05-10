@@ -1455,7 +1455,8 @@ async function startServer() {
 
   // Stripe webhook needs raw body
   app.use('/api/billing/webhook', express.raw({ type: 'application/json' }));
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   // ─── Auth ──────────────────────────────────────────────────────────────────
   app.post('/api/auth/register', async (req, res) => {
@@ -1744,9 +1745,10 @@ async function startServer() {
     }
 
     const history = db.data.messages.filter(m => m.conversation_id === convId).map(m => ({ role: m.role, content: m.content }));
-    // Include image data if provided (base64 encoded)
+    // Include image context if provided
+    const imageName = (req.body as any).imageName || 'image';
     const messageWithImage = imageData
-      ? message + `\n\n[The user has shared an image. Base64 data: ${imageData.slice(0, 100)}... (image provided for analysis). Please describe what you see and help create variations, stickers, or content based on it.]`
+      ? message + `\n\n[The user has uploaded an image named "${imageName}". The image has been shared for your analysis. Please describe what you see in detail, then proactively suggest: 1) sticker concepts based on the image 2) creative variations 3) how to turn it into a Telegram sticker pack. Be enthusiastic and creative.]`
       : message;
     history.push({ role: 'user', content: messageWithImage });
 
