@@ -1799,8 +1799,8 @@ async function startServer() {
       : '';
 
     // Inject last image description for conversational image context
-    const conv = db.data.conversations.find((c: any) => c.id === convId);
-    const lastImgDesc = (conv as any)?.last_image_description;
+    const convCtx = db.data.conversations.find((c: any) => c.id === convId);
+    const lastImgDesc = (convCtx as any)?.last_image_description;
     const imageContextAddition = lastImgDesc && !imageData
       ? `\n\n## Image Context From This Conversation\nThe user previously shared an image in this conversation. Here is what it shows: "${lastImgDesc}"\nWhen the user refers to "this image", "this meme", "that image", or similar, they are referring to this image. Use this context to answer.`
       : '';
@@ -1837,8 +1837,8 @@ async function startServer() {
       console.log('[auth-chat] Vision response length:', rawContent.length);
       // Store image description in conversation for future reference
       const imgDesc = rawContent.slice(0, 500);
-      const conv = db.data.conversations.find((c: any) => c.id === convId);
-      if (conv) (conv as any).last_image_description = imgDesc;
+      const convForImg = db.data.conversations.find((c: any) => c.id === convId);
+      if (convForImg) (convForImg as any).last_image_description = imgDesc;
       save();
     } else {
       const aiRes = await callAI(activeProvider, effectiveModel, finalSystemPrompt, history, plan.maxTokens);
