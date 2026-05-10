@@ -8,9 +8,24 @@ import {
   Users, Trash2, ChevronRight, Search, Database, AlertCircle, RefreshCw
 } from 'lucide-react'
 
-const TABS = {AGENT_MODELS.map(m => (
-                    <option key={m.id} value={m.id}>{m.label}</option>
-                  ))}); setMessages([{ role: 'agent', text: 'Conversation cleared. How can I help you?', ts: t }]); }}
+
+function MsgText({ text }: { text: string }) {
+  const [exp, setExp] = useState(false)
+  const long = text.length > 300
+  return (
+    <div style={{ wordBreak: "break-word" }}>
+      <span>{long && !exp ? text.slice(0, 280) + "..." : text}</span>
+      {long && (
+        <button onClick={() => setExp(e => !e)}
+          style={{ display: "block", marginTop: 4, fontSize: 11, color: "#a78bfa", cursor: "pointer", background: "none", border: "none", padding: 0 }}>
+          {exp ? "Show less ↑" : "Read more ↓"}
+        </button>
+      )}
+    </div>
+  )
+}
+
+const TABS = [
           className="p-1.5 rounded-lg border border-[#1e1e2e] text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
           title="Clear conversation"
         >
