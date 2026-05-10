@@ -25,6 +25,7 @@ const NAV_GROUPS = [
     items: [
       { icon: Users, label: 'Leads', path: '/dashboard/leads', tooltip: 'Manage contacts captured by your agents' },
       { icon: Radio, label: 'Broadcasts', path: '/dashboard/broadcasts', tooltip: 'Send bulk messages to your audience', badge: 'NEW' },
+      { icon: Users2, label: 'Community Hub', path: '/dashboard/community', tooltip: 'Manage Telegram bots, communities & sticker packs', badge: 'NEW' },
       { icon: Users2, label: 'Teams', path: '/dashboard/teams', tooltip: 'Collaborate with team members' },
     ],
   },
