@@ -39,7 +39,7 @@ const TABS = [
   { id: 'settings', label: 'Settings', icon: Settings },
 ]
 
-interface ChatMsg { role: 'user' | 'agent'; text: string; ts: string }
+interface ChatMsg { role: 'user' | 'agent'; text: string; ts: string; imageUrl?: string }
 interface Command { trigger: string; response: string; description?: string }
 
 function getTime() {
