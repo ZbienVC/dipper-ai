@@ -424,6 +424,42 @@ function buildAgentSystemPrompt(agent: Agent, contextPrompt?: string): string {
   const base = contextPrompt || agent.system_prompt;
   const parts: string[] = [base];
 
+  // Tool awareness — tell the agent what it can do
+  const availableTools: string[] = (agent as any).tools_enabled || [];
+  const toolDescriptions: Record<string, string> = {
+    web_search: 'Search the web for current information. When user asks to research, look something up, or find current info — use this.',
+    generate_image: 'Generate images from text descriptions using DALL-E 3. When asked to create/draw/generate an image — use this.',
+    send_email: 'Send emails on behalf of the user. Always confirm recipient, subject and body before sending.',
+    create_lead: 'Save contact information to the CRM when someone expresses interest.',
+    send_notification: 'Alert the agent owner about important events.',
+    get_time: 'Get current date and time.',
+    calculate: 'Perform math calculations accurately.',
+    search_knowledge_base: 'Search your custom knowledge for relevant information.',
+    webhook: 'Trigger external webhooks for automation.',
+  };
+  if (availableTools.length > 0) {
+    parts.push('\n## Your Available Tools\nYou have these capabilities available. Use them proactively when relevant:\n' +
+      availableTools.map((t: string) => '- **' + t + '**: ' + (toolDescriptions[t] || t)).join('\n') +
+      '\n\nWhen using a tool, say something like "Let me search that for you..." then provide the result. For image generation, always display the generated image URL. For email sending, always confirm details with the user first.');
+  }
+
+  // Personality modifiers
+  const p = (agent as any).personality || {};
+  const personalityParts: string[] = [];
+  if (p.tone === 'friendly') personalityParts.push('Be warm, conversational and approachable.');
+  if (p.tone === 'professional') personalityParts.push('Maintain a professional, polished tone.');
+  if (p.tone === 'creative') personalityParts.push('Be expressive, creative and think outside the box.');
+  if (p.verbosity === 'concise') personalityParts.push('Keep responses brief and to the point. Avoid unnecessary elaboration.');
+  if (p.verbosity === 'detailed') personalityParts.push('Be thorough and comprehensive in your responses.');
+  if (p.creativity > 70) personalityParts.push('Embrace creative and unconventional approaches.');
+  if (p.formality > 70) personalityParts.push('Use formal language and proper structure.');
+  if (p.formality < 30) personalityParts.push('Keep it casual and conversational.');
+  if (p.emoji_usage > 50) personalityParts.push('Use emojis naturally to add personality. 🎯');
+  if (p.emoji_usage < 10) personalityParts.push('Avoid using emojis.');
+  if (personalityParts.length > 0) {
+    parts.push('\n## Communication Style\n' + personalityParts.join(' '));
+  }
+
   if (agent.knowledge_base && agent.knowledge_base.trim()) {
     parts.unshift(`=== Agent Knowledge Base ===\n${agent.knowledge_base.trim()}\n=== End Knowledge Base ===`);
   }
