@@ -1722,7 +1722,7 @@ async function startServer() {
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
     if (!checkLimit(req.user, 'messages'))
       return res.status(429).json({ error: 'Daily message limit reached.' });
-    const { message, conversationId, model: requestedModel } = req.body;
+    const { message, conversationId, model: requestedModel, imageData } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
 
     // Sanitize model name — fix incomplete IDs
@@ -1744,7 +1744,11 @@ async function startServer() {
     }
 
     const history = db.data.messages.filter(m => m.conversation_id === convId).map(m => ({ role: m.role, content: m.content }));
-    history.push({ role: 'user', content: message });
+    // Include image data if provided (base64 encoded)
+    const messageWithImage = imageData
+      ? message + `\n\n[The user has shared an image. Base64 data: ${imageData.slice(0, 100)}... (image provided for analysis). Please describe what you see and help create variations, stickers, or content based on it.]`
+      : message;
+    history.push({ role: 'user', content: messageWithImage });
 
     const plan = PLANS[req.user.plan] || PLANS.free;
     const startTime = Date.now();
