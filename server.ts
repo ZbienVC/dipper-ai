@@ -1766,7 +1766,11 @@ async function startServer() {
     const messageWithImage = imageData
       ? message + `\n\n[The user has uploaded an image named "${imageName}". The image has been shared for your analysis. Please describe what you see in detail, then proactively suggest: 1) sticker concepts based on the image 2) creative variations 3) how to turn it into a Telegram sticker pack. Be enthusiastic and creative.]`
       : message;
-    history.push({ role: 'user', content: messageWithImage });
+    // Include image name hint in message for conversation history
+    const imageHint = imageData && (req.body as any).imageName 
+      ? ` [User attached image: ${(req.body as any).imageName}]`
+      : '';
+    history.push({ role: 'user', content: messageWithImage + imageHint });
 
     const plan = PLANS[req.user.plan] || PLANS.free;
     const startTime = Date.now();
@@ -1794,7 +1798,13 @@ async function startServer() {
         '\n\nIMPORTANT: Never output XML tags, function_call syntax, or technical markup. Never write <invoke>, <function_calls>, or TOOL: in your responses. The system detects your intent automatically. Just respond naturally and the right tools will be called for you.'
       : '';
 
-    const finalSystemPrompt = systemPromptWithMemory + toolSystemAddition;
+    // Inject last image description for conversational image context
+    const conv = db.data.conversations.find((c: any) => c.id === convId);
+    const lastImgDesc = (conv as any)?.last_image_description;
+    const imageContextAddition = lastImgDesc && !imageData
+      ? `\n\n## Image Context From This Conversation\nThe user previously shared an image in this conversation. Here is what it shows: "${lastImgDesc}"\nWhen the user refers to "this image", "this meme", "that image", or similar, they are referring to this image. Use this context to answer.`
+      : '';
+    const finalSystemPrompt = systemPromptWithMemory + toolSystemAddition + imageContextAddition;
 
     // First AI call - use vision API if imageData present
     let rawContent: string;
@@ -1825,6 +1835,11 @@ async function startServer() {
       rawContent = (visionResp.content[0] as any).text;
       tokensUsed = (visionResp.usage?.input_tokens || 0) + (visionResp.usage?.output_tokens || 0);
       console.log('[auth-chat] Vision response length:', rawContent.length);
+      // Store image description in conversation for future reference
+      const imgDesc = rawContent.slice(0, 500);
+      const conv = db.data.conversations.find((c: any) => c.id === convId);
+      if (conv) (conv as any).last_image_description = imgDesc;
+      save();
     } else {
       const aiRes = await callAI(activeProvider, effectiveModel, finalSystemPrompt, history, plan.maxTokens);
       rawContent = aiRes.text;
