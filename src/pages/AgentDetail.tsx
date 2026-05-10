@@ -366,26 +366,28 @@ export default function AgentDetail() {
     try {
       let reply: string
       if (token) {
+        // Pre-compute base64 image data before fetch
+        let precomputedImageData: string | undefined
+        if (uploadedFile?.localFile && uploadedFile.type.startsWith('image/')) {
+          precomputedImageData = await new Promise<string>((resolve) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(reader.result as string)
+            reader.readAsDataURL(uploadedFile.localFile!)
+          })
+          // Skip if too large (>400KB base64)
+          if (precomputedImageData && precomputedImageData.length > 550000) {
+            precomputedImageData = undefined
+          }
+        }
         const res = await fetch(`/api/agents/${id}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: await (async () => {
-            let imageData: string | undefined
-            if (uploadedFile?.localFile && uploadedFile.type.startsWith('image/')) {
-              imageData = await new Promise<string>((resolve) => {
-                const reader = new FileReader()
-                reader.onload = () => resolve(reader.result as string)
-                reader.readAsDataURL(uploadedFile.localFile!)
-              })
-              if (imageData && imageData.length > 500000) imageData = undefined
-            }
-            return JSON.stringify({ 
+          body: (() => JSON.stringify({ 
               message: currentInput + (uploadedFile ? `\n[Attached: ${uploadedFile.name}]` : ''),
               model: selectedModel,
-              imageData,
+              imageData: precomputedImageData,
               imageName: uploadedFile?.name,
-            })
-          })(),
+            }))(),
         })
         const data = await res.json()
         reply = data.content || data.error || 'Something went wrong.'
