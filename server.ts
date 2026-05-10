@@ -306,25 +306,6 @@ const PLANS: Record<string, { agents: number; messagesPerMonth: number; messages
   pro:      { agents: 5,   messagesPerMonth: 5000,  messagesPerDay: 200,  integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'gpt-4o-mini'], maxTokens: 1024, price: 29 },
   admin:    { agents: 999999, messagesPerMonth: 999999999, messagesPerDay: 999999, integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 8192, price: 0 },
   business: { agents: 999, messagesPerMonth: 25000, messagesPerDay: 1000, integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 2048, price: 79 },
-};
-  {
-    id: 'buy-bot',
-    name: 'Buy Alert Bot',
-    emoji: '💰',
-    desc: 'Real-time on-chain buy alerts posted to Telegram',
-    systemPrompt: 'You are a Buy Alert Bot. Monitor blockchain transactions and post formatted buy alerts to Telegram when purchases happen. Format alerts with buyer amount, market cap, chart link. Be punchy - buy alerts should feel like wins.',
-    tools_enabled: ['send_notification', 'webhook', 'web_search'],
-  }
-];
-
-// ─── Auth Middleware ──────────────────────────────────────────────────────────
-function auth(req: any, res: any, next: any) {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    const decoded: any = jwt.verify(token, JWT_SECRET);
-    const user = findUser(decoded.userId);
-    if (!user) return res.status(401).json({ error: 'User not found' });
     req.userId = decoded.userId;
     req.user = user;
     next();
