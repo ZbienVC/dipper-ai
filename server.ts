@@ -5226,6 +5226,67 @@ async function telegramStickerTool(
     }
   });
 
+
+
+  // ─── Telegram Bot Setup Guide ─────────────────────────────────────────────────
+  app.get('/api/integrations/telegram/setup-guide', auth, (req: any, res: any) => {
+    const appUrl = process.env.APP_URL || 'https://dipper-ai-production.up.railway.app';
+    res.json({
+      steps: [
+        { step: 1, title: 'Open BotFather', instruction: 'Open Telegram and search for @BotFather or click: https://t.me/botfather', action: 'Open @BotFather' },
+        { step: 2, title: 'Create your bot', instruction: 'Send /newbot to BotFather, then choose a name and username for your bot (username must end in "bot")', action: 'Type /newbot' },
+        { step: 3, title: 'Copy your token', instruction: 'BotFather will give you a token like: 1234567890:AAFxxxxxxxx - copy it', action: 'Copy the token' },
+        { step: 4, title: 'Paste it here', instruction: 'Paste your bot token in the field below and click Connect', action: 'Paste & Connect' },
+      ],
+      webhookUrl: appUrl + '/api/integrations/telegram/webhook/{agentId}',
+      note: 'Once connected, your agent will automatically receive messages from anyone who messages your bot on Telegram.',
+    });
+  });
+  
+  // Auto-register webhook when Telegram is connected
+  app.post('/api/integrations/telegram/auto-webhook/:agentId', auth, async (req: any, res: any) => {
+    const { botToken } = req.body;
+    if (!botToken) return res.status(400).json({ error: 'botToken required' });
+    const appUrl = process.env.APP_URL || 'https://dipper-ai-production.up.railway.app';
+    const webhookUrl = appUrl + '/api/integrations/telegram/webhook/' + req.params.agentId;
+    try {
+      const r = await fetch('https://api.telegram.org/bot' + botToken + '/setWebhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message', 'callback_query', 'inline_query'] }),
+      });
+      const d: any = await r.json();
+      if (d.ok) {
+        const meR = await fetch('https://api.telegram.org/bot' + botToken + '/getMe');
+        const me: any = await meR.json();
+        res.json({ ok: true, webhook_url: webhookUrl, bot_username: me.result?.username, bot_name: me.result?.first_name });
+      } else {
+        res.status(400).json({ error: d.description || 'Webhook registration failed' });
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Email From Settings ──────────────────────────────────────────────────────
+  app.get('/api/settings/email-from', auth, (req: any, res: any) => {
+    const user = req.user;
+    const options = [
+      { value: 'dipper', label: 'DipperAI (noreply)', from: 'DipperAI <onboarding@resend.dev>' },
+      { value: 'zbienstock', label: user.email || 'Your Email', from: (user.email || 'zbienstock@gmail.com') + ' <' + (user.email || 'zbienstock@gmail.com') + '>' },
+    ];
+    res.json({ options, current: (user as any).email_from_label || 'dipper' });
+  });
+  
+  app.put('/api/settings/email-from', auth, (req: any, res: any) => {
+    const { label } = req.body;
+    const valid = ['dipper', 'zbienstock', 'custom'];
+    if (!valid.includes(label)) return res.status(400).json({ error: 'Invalid label' });
+    (req.user as any).email_from_label = label;
+    save();
+    res.json({ ok: true });
+  });
+
   // ─── Platform Guide AI ────────────────────────────────────────────────────
   app.post('/api/platform-guide', async (req: any, res: any) => {
     const { messages } = req.body;
