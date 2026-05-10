@@ -1786,7 +1786,8 @@ async function startServer() {
     // Tool awareness - server handles execution, agent just needs to know what it can do
     const toolCapabilities: Record<string, string> = {
       web_search: 'search the web for current information on any topic',
-      generate_image: 'generate images using AI (DALL-E 3) from text descriptions',
+      generate_image: 'generate images using AI (DALL-E 3) from text descriptions. Call TOOL:generate_image("detailed prompt") to create an image.',
+      create_telegram_sticker: 'create a sticker-optimized image ready for Telegram. Call TOOL:create_telegram_sticker("description") to generate.',
       send_email: 'send emails on behalf of the user',
       create_lead: 'save contact information to the CRM',
       get_time: 'get the current date and time',
@@ -1839,7 +1840,7 @@ async function startServer() {
     // Parse and execute any tool calls in the response
     let content = rawContent;
     if (agentTools.length > 0) {
-      const toolCallPattern = /TOOL:(w+)(([^)]*))/g;
+      const toolCallPattern = /TOOL:(\w+)\(([^)]*)\)/g;
       let match;
       const toolResults: Array<{tool: string; result: string}> = [];
 
@@ -1854,9 +1855,16 @@ async function startServer() {
             toolResult = await webSearch(args[0] || rawContent, 4);
           } else if (toolName === 'generate_image' && agentTools.includes('generate_image')) {
             const imgUrl = await generateImage(args[0] || rawContent);
-            toolResult = imgUrl.startsWith('http') ? '[IMAGE_GENERATED]:' + imgUrl : imgUrl;
+            toolResult = imgUrl.startsWith('http') ? 'Here is your generated image:\n![generated image](' + imgUrl + ')' : imgUrl;
           } else if (toolName === 'send_email' && agentTools.includes('send_email')) {
             toolResult = await sendEmailTool(args[0] || '', args[1] || 'Message from agent', args[2] || '', 'dipper');
+          } else if (toolName === 'create_telegram_sticker' && agentTools.includes('generate_image')) {
+            // Generate a sticker-style image and guide user through pack creation
+            const prompt = (args[0] || rawContent) + ', sticker style, white background, bold outlines, cartoon, transparent background ready';
+            const stickerUrl = await generateImage(prompt, '1024x1024');
+            toolResult = stickerUrl.startsWith('http') 
+              ? 'Sticker image generated! URL: ' + stickerUrl + '\n\nTo add to a Telegram sticker pack, go to @Stickers bot in Telegram, tap "Add a Sticker to a Pack" and upload this image. You can also use the /api/tools/create-sticker-pack endpoint with your bot token.'
+              : 'Could not generate sticker: ' + stickerUrl;
           } else if (toolName === 'create_lead' && agentTools.includes('create_lead')) {
             // Use the existing create_lead logic
             if (!db.data.leads) db.data.leads = [];
