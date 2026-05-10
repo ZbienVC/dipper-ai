@@ -30,6 +30,7 @@ const Reports = lazy(() => import('./pages/Reports'))
 const Onboarding = lazy(() => import('./pages/Onboarding'))
 const ConversationSearch = lazy(() => import('./pages/ConversationSearch'))
 const MediaAgent = lazy(() => import('./pages/MediaAgent'))
+const CommunityHub = lazy(() => import('./pages/CommunityHub'))
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword'))
 
@@ -86,6 +87,7 @@ function App() {
           <Route path="/onboarding" element={<PrivateRoute><Onboarding /></PrivateRoute>} />
           <Route path="/dashboard/search" element={<PrivateRoute><ConversationSearch /></PrivateRoute>} />
           <Route path="/dashboard/media" element={<PrivateRoute><MediaAgent /></PrivateRoute>} />
+          <Route path="/dashboard/community" element={<PrivateRoute><CommunityHub /></PrivateRoute>} />
 
           <Route path="/admin" element={<Admin />} />
 
