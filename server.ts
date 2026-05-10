@@ -308,7 +308,7 @@ const PLANS: Record<string, { agents: number; messagesPerMonth: number; messages
   business: { agents: 999, messagesPerMonth: 25000, messagesPerDay: 1000, integrations: 999, allowedModels: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5', 'gpt-4o', 'gpt-4o-mini', 'gemini-1.5-pro', 'gemini-1.5-flash'], maxTokens: 2048, price: 79 },
 };
 
-  ,{
+  {
     id: 'community-manager',
     name: 'Community Manager',
     emoji: '🏘️',
