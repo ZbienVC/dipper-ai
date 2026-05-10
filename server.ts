@@ -1737,7 +1737,96 @@ async function startServer() {
       const knowledgeContext = buildKnowledgeContext(agent.id, message);
       const basePrompt = buildAgentSystemPrompt(agent, knowledgeContext ? `${knowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt);
       const systemPromptWithMemory = memoryContext ? `${memoryContext}\n\n${basePrompt}` : basePrompt;
-      const { text: content, tokensUsed } = await callAI(activeProvider, effectiveModel, systemPromptWithMemory, history, plan.maxTokens);
+      // Tool-aware chat execution
+    const agentTools: string[] = (agent as any).tools_enabled || [];
+    
+    // Tool definitions injected into system prompt
+    const toolDefs: Record<string, string> = {
+      web_search: 'Search the web. Usage: call TOOL:web_search("your query")',
+      generate_image: 'Generate an image. Usage: call TOOL:generate_image("detailed prompt")',
+      send_email: 'Send an email. Usage: call TOOL:send_email("to@email.com", "Subject", "Body")',
+      create_lead: 'Save a lead/contact. Usage: call TOOL:create_lead("Name", "email", "phone", "notes")',
+      get_time: 'Get current time. Usage: call TOOL:get_time()',
+      calculate: 'Calculate math. Usage: call TOOL:calculate("2 + 2 * 10")',
+    };
+    const toolSystemAddition = agentTools.length > 0
+      ? '\n\n## Tools Available To You\nYou have these tools. When you need to use one, output the TOOL call on its own line exactly as shown, then continue your response.\n' +
+        agentTools.filter((t: string) => toolDefs[t]).map((t: string) => toolDefs[t]).join('\n') +
+        '\n\nAfter calling a tool, you will receive the result and should incorporate it naturally into your response. Never mention the raw tool syntax to users.'
+      : '';
+
+    const finalSystemPrompt = systemPromptWithMemory + toolSystemAddition;
+
+    // First AI call
+    let { text: rawContent, tokensUsed } = await callAI(activeProvider, effectiveModel, finalSystemPrompt, history, plan.maxTokens);
+
+    // Parse and execute any tool calls in the response
+    let content = rawContent;
+    if (agentTools.length > 0) {
+      const toolCallPattern = /TOOL:(w+)(([^)]*))/g;
+      let match;
+      const toolResults: Array<{tool: string; result: string}> = [];
+
+      while ((match = toolCallPattern.exec(rawContent)) !== null) {
+        const [fullMatch, toolName, argsStr] = match;
+        // Parse args — simple CSV inside quotes
+        const args = argsStr.match(/"([^"]*?)"/g)?.map(s => s.replace(/"/g, '')) || [argsStr];
+        
+        try {
+          let toolResult = '';
+          if (toolName === 'web_search' && agentTools.includes('web_search')) {
+            toolResult = await webSearch(args[0] || rawContent, 4);
+          } else if (toolName === 'generate_image' && agentTools.includes('generate_image')) {
+            const imgUrl = await generateImage(args[0] || rawContent);
+            toolResult = imgUrl.startsWith('http') ? '[IMAGE_GENERATED]:' + imgUrl : imgUrl;
+          } else if (toolName === 'send_email' && agentTools.includes('send_email')) {
+            toolResult = await sendEmailTool(args[0] || '', args[1] || 'Message from agent', args[2] || '', 'dipper');
+          } else if (toolName === 'create_lead' && agentTools.includes('create_lead')) {
+            // Use the existing create_lead logic
+            if (!db.data.leads) db.data.leads = [];
+            const leadId = randomUUID();
+            const now = new Date().toISOString();
+            db.data.leads.push({ id: leadId, user_id: req.userId, agent_id: agent.id, agent_name: agent.name, identifier: args[1] || args[0] || leadId, channel: 'web', display_name: args[0], email: args[1], phone: args[2], stage: 'new', tags: [], notes: args[3] || '', message_count: 0, last_contact: now, first_contact: now, created_at: now, updated_at: now });
+            save();
+            toolResult = 'Lead saved for ' + (args[0] || 'contact');
+          } else if (toolName === 'get_time') {
+            toolResult = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+          } else if (toolName === 'calculate') {
+            try { const safe = (args[0] || '').replace(/[^0-9+\-*/.()%\s]/g, ''); toolResult = String(eval(safe)); } catch { toolResult = 'Calculation error'; }
+          }
+          if (toolResult) toolResults.push({ tool: toolName, result: toolResult });
+        } catch (toolErr: any) {
+          console.error('[tool-call] ' + toolName + ' failed:', toolErr?.message);
+        }
+      }
+
+      // If tools were called, do a second AI pass with results to get a clean final response
+      if (toolResults.length > 0) {
+        const toolResultsText = toolResults.map(tr => {
+          if (tr.result.startsWith('[IMAGE_GENERATED]:')) {
+            return 'TOOL RESULT (' + tr.tool + '): Image generated successfully. URL: ' + tr.result.replace('[IMAGE_GENERATED]:', '');
+          }
+          return 'TOOL RESULT (' + tr.tool + '): ' + tr.result;
+        }).join('\n\n');
+
+        // Check if any images were generated
+        const imageUrls = toolResults
+          .filter(tr => tr.result.startsWith('[IMAGE_GENERATED]:'))
+          .map(tr => tr.result.replace('[IMAGE_GENERATED]:', ''));
+
+        const followUpHistory = [...history, { role: 'assistant', content: rawContent }, { role: 'user', content: 'SYSTEM: Tool results received:\n\n' + toolResultsText + '\n\nNow provide your final response to the user incorporating these results naturally. Do not mention tool calls or raw URLs. If images were generated, mention that you created an image and share the URL as a clickable link.' }];
+        const { text: finalContent, tokensUsed: followUpTokens } = await callAI(activeProvider, effectiveModel, finalSystemPrompt, followUpHistory, plan.maxTokens);
+        tokensUsed += followUpTokens;
+        
+        // Append image URLs directly to response for frontend rendering
+        content = finalContent;
+        if (imageUrls.length > 0) {
+          content = content + '\n\n' + imageUrls.map(url => '[Generated Image](' + url + ')').join('\n');
+        }
+      } else {
+        content = rawContent;
+      }
+    }
       const latency_ms = Date.now() - startTime;
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: effectiveModel, created_at: new Date().toISOString() });
