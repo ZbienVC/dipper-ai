@@ -586,6 +586,9 @@ function buildAgentSystemPrompt(agent: Agent, contextPrompt?: string): string {
     if (toolDescs.length > 0) parts.push(`You have the following capabilities:\n${toolDescs.join('\n')}`);
   }
 
+  // Hard rules appended to every agent - non-negotiable
+  parts.push('RESPONSE FORMAT RULES: Keep responses under 80 words unless the user explicitly asks for more detail. Write in 1-3 short paragraphs maximum. No bullet points, no numbered lists, no dashes, no headers, no bold text. Sound like a real person texting, not writing a report. If you need to list things, weave them into a sentence naturally.');
+  
   return parts.join('\n\n');
 }
 
