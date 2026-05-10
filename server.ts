@@ -2844,7 +2844,33 @@ async function startServer() {
       const knCtx = buildKnowledgeContext(agent.id, message);
       const basePrompt = buildAgentSystemPrompt(agent, knCtx ? `${knCtx}\n\n${agent.system_prompt}` : agent.system_prompt);
       const systemPrompt = memCtx ? `${memCtx}\n\n${basePrompt}` : basePrompt;
-      const { text: content, tokensUsed } = await callAI(agent.provider, agent.model, systemPrompt, history, 1024);
+      // Use vision API if image data present, otherwise standard callAI
+      let aiResult: { text: string; tokensUsed: number };
+      if (imageData && activeProvider === 'anthropic') {
+        const anthropicVision = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const base64Data = imageData.replace(/^data:image\/[^;]+;base64,/, '');
+        const mimeMatch = imageData.match(/^data:(image\/[^;]+);/);
+        const mediaType = (mimeMatch?.[1] || 'image/jpeg') as any;
+        const lastUserMsg = history[history.length - 1];
+        const userText = (lastUserMsg?.content || '').replace(/\[User attached:[^\]]*\]/g, '').trim() || 'Analyze this image and suggest creative sticker concepts based on what you see.';
+        const visionMessages = [
+          ...history.slice(0, -1).map((m: any) => ({ role: m.role as any, content: m.content })),
+          { role: 'user' as const, content: [
+            { type: 'image' as const, source: { type: 'base64' as const, media_type: mediaType, data: base64Data } },
+            { type: 'text' as const, text: userText }
+          ]}
+        ];
+        const visionResponse = await anthropicVision.messages.create({
+          model: effectiveModel,
+          max_tokens: plan.maxTokens,
+          system: finalSystemPrompt + '\n\nCRITICAL writing rules: Write in plain conversational paragraphs only. No markdown headers (no # or ##). No bullet points. No bold asterisks (**text**). No dashes for lists. Just natural flowing sentences like a real person talking.',
+          messages: visionMessages,
+        });
+        aiResult = { text: (visionResponse.content[0] as any).text, tokensUsed: (visionResponse.usage?.input_tokens || 0) + (visionResponse.usage?.output_tokens || 0) };
+      } else {
+        aiResult = await callAI(agent.provider, agent.model, finalSystemPrompt + '\n\nCRITICAL: No markdown headers, no bullet points, no bold, no dashes. Plain paragraphs only.', history, plan.maxTokens);
+      }
+      const { text: content, tokensUsed } = aiResult;
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: agent.model, created_at: new Date().toISOString() });
       agent.total_messages++;
