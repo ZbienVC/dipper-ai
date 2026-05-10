@@ -485,6 +485,22 @@ async function callAI(provider: string, model: string, systemPrompt: string, mes
 }
 
 // Build system prompt incorporating agent knowledge base + response format
+
+// Strip leaked tool call XML and clean up response for display
+function cleanAgentResponse(text: string): string {
+  // Remove any XML/function_call tags that leaked into output
+  let clean = text
+    .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '')
+    .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
+    .replace(/<parameter[\s\S]*?<\/antml:parameter>/g, '')
+    .replace(/<[^>]+>/g, '') // strip any remaining XML tags
+    .replace(/TOOL:\w+\([^)]*\)/g, '') // strip our own TOOL: markers if leaked
+    .trim();
+  // Collapse multiple blank lines
+  clean = clean.replace(/\n{3,}/g, '\n\n').trim();
+  return clean;
+}
+
 function buildAgentSystemPrompt(agent: Agent, contextPrompt?: string): string {
   const base = contextPrompt || agent.system_prompt;
   const parts: string[] = [base];
@@ -1741,18 +1757,19 @@ async function startServer() {
     const agentTools: string[] = (agent as any).tools_enabled || [];
     
     // Tool definitions injected into system prompt
-    const toolDefs: Record<string, string> = {
-      web_search: 'Search the web. Usage: call TOOL:web_search("your query")',
-      generate_image: 'Generate an image. Usage: call TOOL:generate_image("detailed prompt")',
-      send_email: 'Send an email. Usage: call TOOL:send_email("to@email.com", "Subject", "Body")',
-      create_lead: 'Save a lead/contact. Usage: call TOOL:create_lead("Name", "email", "phone", "notes")',
-      get_time: 'Get current time. Usage: call TOOL:get_time()',
-      calculate: 'Calculate math. Usage: call TOOL:calculate("2 + 2 * 10")',
+    // Tool awareness - server handles execution, agent just needs to know what it can do
+    const toolCapabilities: Record<string, string> = {
+      web_search: 'search the web for current information on any topic',
+      generate_image: 'generate images using AI (DALL-E 3) from text descriptions',
+      send_email: 'send emails on behalf of the user',
+      create_lead: 'save contact information to the CRM',
+      get_time: 'get the current date and time',
+      calculate: 'perform mathematical calculations',
     };
     const toolSystemAddition = agentTools.length > 0
-      ? '\n\n## Tools Available To You\nYou have these tools. When you need to use one, output the TOOL call on its own line exactly as shown, then continue your response.\n' +
-        agentTools.filter((t: string) => toolDefs[t]).map((t: string) => toolDefs[t]).join('\n') +
-        '\n\nAfter calling a tool, you will receive the result and should incorporate it naturally into your response. Never mention the raw tool syntax to users.'
+      ? '\n\n## Your Capabilities\nYou have these capabilities available (the system handles them automatically):\n' +
+        agentTools.filter((t: string) => toolCapabilities[t]).map((t: string) => '- You can ' + toolCapabilities[t]).join('\n') +
+        '\n\nIMPORTANT: Never output XML tags, function_call syntax, or technical markup. Never write <invoke>, <function_calls>, or TOOL: in your responses. The system detects your intent automatically. Just respond naturally and the right tools will be called for you.'
       : '';
 
     const finalSystemPrompt = systemPromptWithMemory + toolSystemAddition;
@@ -1858,7 +1875,7 @@ async function startServer() {
       }
       save();
       logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'web', summary: 'Replied to web chat message', details: content.slice(0, 200), model_used: effectiveModel, tokens_used: tokensUsed, latency_ms, status: 'success' });
-      res.json({ content, conversationId: convId, model_used: effectiveModel });
+      res.json({ content: cleanAgentResponse(content), conversationId: convId, model_used: effectiveModel });
     } catch (e: any) {
       console.error('[chat error]', e?.message, e?.status, e?.error);
       logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'error', channel: 'web', summary: 'Error during web chat', status: 'error', error_message: e?.message });
