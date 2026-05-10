@@ -99,3 +99,4 @@ Use this credential for admin login (full access):
 | POST | `/api/agents/:id/chat` | Chat with agent |
 | GET | `/api/templates` | List templates |
 | GET | `/api/analytics` | Get analytics |
+<!-- deploy trigger 1778376043975 -->
