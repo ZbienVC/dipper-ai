@@ -6,22 +6,19 @@ import { Check, ChevronRight, ChevronLeft, Rocket, Bot, Zap, Brain, Sparkles, St
 const STEPS = ['Start', 'Identity', 'Model', 'Knowledge', 'Channels', 'Launch']
 
 const TEMPLATES = [
+  { id: 'research-agent', name: 'Research Agent', emoji: '🔬', desc: 'Deep research & fact-finding', systemPrompt: '' },
+  { id: 'personal-assistant', name: 'Personal Assistant', emoji: '🧠', desc: 'Research, emails & daily tasks', systemPrompt: '' },
+  { id: 'sales-outreach', name: 'Sales Outreach', emoji: '💰', desc: 'Lead outreach & deal closing', systemPrompt: '' },
+  { id: 'content-creator', name: 'Content Creator', emoji: '✍️', desc: 'Posts, scripts & campaigns', systemPrompt: '' },
+  { id: 'creative-director', name: 'Creative Director', emoji: '🎨', desc: 'Brand, visuals & campaigns', systemPrompt: '' },
+  { id: 'community-builder', name: 'Community Manager', emoji: '🌐', desc: 'Engage & grow community', systemPrompt: '' },
+  { id: 'builder-assistant', name: 'Builder / Dev', emoji: '⚙️', desc: 'Code help & architecture', systemPrompt: '' },
+  { id: 'crypto-advisor', name: 'Crypto Advisor', emoji: '🔷', desc: 'Web3 & market intelligence', systemPrompt: '' },
   { id: 'customer-support', name: 'Customer Support', emoji: '🎧', desc: 'Handle FAQs & tickets 24/7', systemPrompt: 'You are a professional and empathetic customer support agent. You resolve issues quickly, acknowledge frustration with patience, and always aim to leave the customer satisfied.' },
   { id: 'sales-bot', name: 'Sales Agent', emoji: '💼', desc: 'Qualify leads & close deals', systemPrompt: 'You are a skilled sales agent. You ask thoughtful discovery questions, listen actively, and understand the prospect\'s real needs before presenting solutions.' },
-  { id: 'community-manager', name: 'Community Manager', emoji: '🌐', desc: 'Engage your community', systemPrompt: 'You are an engaging community manager. You welcome new members, answer questions, and keep conversations lively and positive.' },
-  { id: 'appointment-bot', name: 'Appointment Bot', emoji: '📅', desc: 'Book & manage appointments', systemPrompt: 'You are an appointment booking assistant. You help schedule, reschedule, and confirm appointments efficiently and clearly.' },
   { id: 'lead-capture', name: 'Lead Capture', emoji: '🎯', desc: 'Capture & qualify leads', systemPrompt: 'You are a lead qualification specialist. You engage visitors, understand their needs, and capture contact info for follow-up.' },
-  { id: 'personal-assistant', name: 'Personal Assistant', emoji: '✨', desc: 'Your AI personal assistant', systemPrompt: 'You are a highly capable personal assistant. You help with scheduling, research, writing, and organizing information. You are concise and proactive.' },
   { id: 'ecommerce', name: 'E-commerce Bot', emoji: '🛒', desc: 'Product & order support', systemPrompt: 'You are an e-commerce support specialist. You help customers find products, track orders, handle returns, and answer product questions accurately.' },
-  { id: 'research-agent', name: 'Research Agent', emoji: '🔬', desc: 'Deep research & fact-finding' },
-  { id: 'sales-outreach', name: 'Sales Outreach', emoji: '💰', desc: 'Lead outreach & deal closing' },
-  { id: 'content-creator', name: 'Content Creator', emoji: '✍️', desc: 'Posts, scripts & campaigns' },
-  { id: 'community-builder', name: 'Community Manager', emoji: '🌐', desc: 'Engage & grow community' },
-  { id: 'builder-assistant', name: 'Builder / Dev', emoji: '⚙️', desc: 'Code help & architecture' },
-  { id: 'crypto-advisor', name: 'Crypto Advisor', emoji: '🔷', desc: 'Web3 & market intelligence' },
-  { id: 'personal-assistant', name: 'Personal Assistant', emoji: '🧠', desc: 'Research, emails & tasks' },
-  { id: 'creative-director', name: 'Creative Director', emoji: '🎨', desc: 'Brand, visuals & campaigns' },
-  { id: 'custom', name: 'Custom Agent', emoji: '🤖', desc: 'Start from scratch', systemPrompt: '' },
+  { id: 'custom', name: 'Custom Agent', emoji: '🤖', desc: 'Build from scratch', systemPrompt: '' },
 ]
 
 const TONES = [
