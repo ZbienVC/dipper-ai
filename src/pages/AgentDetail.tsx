@@ -543,20 +543,21 @@ export default function AgentDetail() {
           </p>
         </div>
         <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
-          className="max-w-[200px] px-2 py-1 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm">
-          <optgroup label="Anthropic Claude">
-            <option value="claude-sonnet-4-5">Sonnet 3.5 👁</option>
-            <option value="claude-haiku-4-5">Haiku (fast)</option>
-            <option value="claude-opus-4-5">Opus 👁</option>
+          className="w-full px-4 py-2.5 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white text-sm">
+          <optgroup label="── Anthropic Claude ──">
+            <option value="claude-sonnet-4-5">Sonnet 3.5 👁 — Best default. Balanced speed, quality &amp; vision.</option>
+            <option value="claude-haiku-4-5">Haiku 3 ⚡ — Fastest &amp; cheapest. High-volume text bots only.</option>
+            <option value="claude-opus-4-5">Opus 👁 — Deepest reasoning. Complex research &amp; long docs.</option>
           </optgroup>
-          <optgroup label="OpenAI GPT">
-            <option value="gpt-4o">GPT-4o 👁</option>
-            <option value="gpt-4o-mini">GPT-4o Mini</option>
+          <optgroup label="── OpenAI GPT ──">
+            <option value="gpt-4o">GPT-4o 👁 — Best for code, data &amp; structured output. Vision.</option>
+            <option value="gpt-4o-mini">GPT-4o Mini — Affordable OpenAI. Good writing, no vision.</option>
           </optgroup>
-          <optgroup label="Google Gemini">
-            <option value="gemini-1.5-flash">Gemini Flash</option>
+          <optgroup label="── Google Gemini ──">
+            <option value="gemini-1.5-flash">Gemini Flash — Huge context window. Long documents.</option>
           </optgroup>
         </select>
+        <p className="text-xs text-slate-500 mt-1.5">👁 = can see and analyze images &nbsp;|&nbsp; Models without 👁 are text-only</p>
         <button
           onClick={() => { const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); setMessages([{ role: 'agent', text: 'Conversation cleared. How can I help you?', ts: t }]); }}
           className="p-1.5 rounded-lg border border-[#1e1e2e] text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
