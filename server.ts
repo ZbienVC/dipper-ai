@@ -1634,6 +1634,9 @@ async function startServer() {
     if (!checkLimit(req.user, 'agents'))
       return res.status(403).json({ error: `Agent limit reached for ${req.user.plan} plan.` });
     const { name, emoji, description, systemPrompt, model, provider, templateId, autonomous_mode, response_delay_ms,
+      // Auto-assign tools based on template
+      const TOOL_MAP: Record<string, string[]> = {"creative-director":["generate_image","web_search","create_telegram_sticker"],"content-creator":["generate_image","web_search","send_email"],"research-agent":["web_search","search_knowledge_base","calculate","send_notification"],"personal-assistant":["web_search","send_email","search_knowledge_base","get_time","send_notification"],"sales-outreach":["send_email","create_lead","web_search","send_notification"],"community-builder":["create_lead","send_notification","search_knowledge_base"],"builder-assistant":["web_search","search_knowledge_base","calculate"],"crypto-advisor":["web_search","send_notification","create_lead"],"customer-support":["search_knowledge_base","create_lead","send_notification"],"sales-bot":["create_lead","send_notification","webhook"],"lead-capture":["create_lead","send_notification"],"ecommerce":["search_knowledge_base","create_lead","webhook"],"appointment-bot":["create_lead","send_notification","get_time"],"custom":["web_search","generate_image","send_email","create_lead"]};
+      const autoTools: string[] = req.body.tools_enabled?.length ? req.body.tools_enabled : (templateId && TOOL_MAP[templateId]) ? TOOL_MAP[templateId] : TOOL_MAP['custom'] || [];
       knowledgeText, knowledge_base, response_format, maxResponseLength, max_response_length, always_on, long_term_memory,
       tools_enabled, auto_translate, followup_enabled, followup_delay_hours, followup_message,
       daily_digest_enabled, daily_digest_time, escalate_on_negative, escalation_notify, escalation_message } = req.body;
@@ -1641,7 +1644,7 @@ async function startServer() {
     const agent: Agent = {
       id: randomUUID(), user_id: req.userId, name, emoji: emoji || '🤖',
       description: description || '', system_prompt: systemPrompt,
-      model: model || 'claude-haiku-4-5', provider: provider || 'anthropic',
+      model: model || 'claude-sonnet-4-5', provider: provider || 'anthropic',
       template_id: templateId, total_messages: 0, is_active: true,
       embed_token: randomUUID().replace(/-/g, ''), deployed_embed_enabled: false,
       autonomous_mode: autonomous_mode || false,
@@ -1651,7 +1654,7 @@ async function startServer() {
       max_response_length: maxResponseLength || max_response_length || 500,
       always_on: always_on || false,
       long_term_memory: long_term_memory !== undefined ? long_term_memory : 1,
-      tools_enabled: tools_enabled || [],
+      tools_enabled: autoTools,
       auto_translate: auto_translate || false,
       followup_enabled: followup_enabled || false,
       followup_delay_hours: followup_delay_hours || 24,
