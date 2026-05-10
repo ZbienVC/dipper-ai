@@ -1777,7 +1777,17 @@ async function startServer() {
       db.data.conversations.push({ id: convId, agent_id: agent.id, user_id: req.userId, channel: 'web', message_count: 0, created_at: new Date().toISOString() });
     }
 
-    const history = db.data.messages.filter(m => m.conversation_id === convId).map(m => ({ role: m.role, content: m.content }));
+    // Build history - extract image descriptions from previous messages for context
+    const rawHistory = db.data.messages.filter(m => m.conversation_id === convId);
+    const imageDescriptions = rawHistory
+      .filter(m => m.content.includes('[IMAGE ANALYZED:'))
+      .map(m => { const match = m.content.match(/\[IMAGE ANALYZED: ([^\]]{1,500})/); return match?.[1] || ''; })
+      .filter(Boolean);
+    const history = rawHistory.map(m => ({ role: m.role, content: m.content }));
+    // Add image context to system prompt if there are previous image analyses
+    const imageCtxAddition = imageDescriptions.length > 0 && !imageData
+      ? `\n\n## Previously Analyzed Images In This Conversation\nThe user has shared images that you analyzed. Here is what you saw:\n${imageDescriptions.map((d, i) => (i+1) + '. ' + d).join('\n')}\n\nWhen the user says "this image", "this character", "this meme" or similar, they are referring to the most recently analyzed image above. Use this context to fulfill their requests without asking them to re-upload.\n`
+      : '';
     // Include image context if provided
     const imageName = (req.body as any).imageName || 'image';
     const messageWithImage = imageData
@@ -1817,7 +1827,7 @@ async function startServer() {
       : '';
 
     // Image context comes through conversation history automatically (stored with user message)
-    const finalSystemPrompt = systemPromptWithMemory + toolSystemAddition;
+    const finalSystemPrompt = systemPromptWithMemory + toolSystemAddition + imageCtxAddition;
 
     // First AI call - use vision API if imageData present
     let rawContent: string;
