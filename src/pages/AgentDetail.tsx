@@ -357,6 +357,10 @@ export default function AgentDetail() {
 
   const sendMessage = async () => {
     if ((!inputText.trim() && !uploadedFile) || thinking || !agent) return
+    // Capture file reference immediately before any state changes
+    const capturedFile = uploadedFile?.localFile || null
+    const capturedFileName = uploadedFile?.name || ''
+    const capturedFileType = uploadedFile?.type || ''
     const userMsg: ChatMsg = { role: 'user', text: inputText.trim(), ts: getTime() }
     const currentInput = inputText.trim()
     const token = getToken()
