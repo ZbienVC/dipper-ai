@@ -489,6 +489,8 @@ async function callAI(provider: string, model: string, systemPrompt: string, mes
 // Strip leaked tool call XML and clean up response for display
 function cleanAgentResponse(text: string): string {
   let clean = text
+    // Strip common AI slop openers
+    .replace(/^(Analyzing[^!]*!\s*|Great[^!]*!\s*|Sure[^!]*!\s*|Absolutely[^!]*!\s*|Of course[^!]*!\s*|I'd be happy[^!]*!\s*)/i, '')
     // Strip XML/function_call leakage
     .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '')
     .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
@@ -587,7 +589,7 @@ function buildAgentSystemPrompt(agent: Agent, contextPrompt?: string): string {
   }
 
   // Hard rules appended to every agent - non-negotiable
-  parts.push('RESPONSE FORMAT RULES: Keep responses under 80 words unless the user explicitly asks for more detail. Write in 1-3 short paragraphs maximum. No bullet points, no numbered lists, no dashes, no headers, no bold text. Sound like a real person texting, not writing a report. If you need to list things, weave them into a sentence naturally.');
+  parts.push('RESPONSE STYLE - STRICTLY ENFORCED: You are texting, not writing an essay. Max 2 short sentences per response. Never use bullet points, dashes, numbered lists, headers, or bold/italic text. Never start with "Analyzing" or "Great" or "Sure" or any filler. Get straight to the point. If sharing multiple ideas weave them into one natural sentence. Sound like a smart friend, not a document.');
   
   return parts.join('\n\n');
 }
@@ -2874,13 +2876,13 @@ async function startServer() {
         const visionResponse = await anthropicVision.messages.create({
           model: visionModel,
           max_tokens: plan.maxTokens,
-          system: finalSystemPrompt + '\n\nCRITICAL writing rules: Write in plain conversational paragraphs only. No markdown headers (no # or ##). No bullet points. No bold asterisks (**text**). No dashes for lists. Just natural flowing sentences like a real person talking.',
+          system: finalSystemPrompt + '\n\nSTRICT RULES: Reply in 1-3 sentences max. No lists, no dashes, no headers, no bold, no markdown of any kind. Describe what you see directly, then give your one best idea. Sound like a creative person texting their friend.',
           messages: visionMessages,
         });
         const visionText = (visionResponse.content[0] as any).text;
         aiResult = { text: visionText, tokensUsed: (visionResponse.usage?.input_tokens || 0) + (visionResponse.usage?.output_tokens || 0) };
       } else {
-        aiResult = await callAI(activeProvider, effectiveModel, finalSystemPrompt + '\n\nCRITICAL: No markdown headers, no bullet points, no bold, no dashes. Plain paragraphs only.', history, plan.maxTokens);
+        aiResult = await callAI(activeProvider, effectiveModel, finalSystemPrompt + '\n\nSTRICT: 1-3 sentences max. No lists, dashes, bullets, headers or bold. Direct and conversational.', history, plan.maxTokens);
       }
       const { text: content, tokensUsed } = aiResult;
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
