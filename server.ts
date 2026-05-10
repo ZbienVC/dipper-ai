@@ -4944,6 +4944,124 @@ async function telegramStickerTool(
   });
 
 
+
+  // ─── Chat File Upload ──────────────────────────────────────────────────────────
+  app.post('/api/chat/upload', auth, async (req: any, res: any) => {
+    try {
+      const multerMod: any = await import('multer');
+      const multer = multerMod.default || multerMod;
+      const upload = multer({
+        dest: MEDIA_TMP || path.join(process.cwd(), 'media-tmp'),
+        limits: { fileSize: 50 * 1024 * 1024 },
+        fileFilter: (_r: any, file: any, cb: any) => {
+          const ok = file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/') ||
+            ['application/pdf','text/plain','image/gif'].includes(file.mimetype);
+          cb(null, ok);
+        }
+      }).single('file');
+
+      upload(req, res, async (err: any) => {
+        if (err) return res.status(400).json({ error: err.message });
+        if (!req.file) return res.status(400).json({ error: 'No file' });
+        
+        // Serve the file from its temp path
+        const fileUrl = '/api/chat/files/' + path.basename(req.file.path);
+        
+        // Store file path mapping
+        if (!(global as any).chatFiles) (global as any).chatFiles = new Map();
+        (global as any).chatFiles.set(path.basename(req.file.path), req.file.path);
+        
+        res.json({ 
+          url: fileUrl, 
+          name: req.file.originalname, 
+          type: req.file.mimetype,
+          size: req.file.size 
+        });
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: 'Upload unavailable: ' + e.message });
+    }
+  });
+
+  // Serve uploaded chat files
+  app.get('/api/chat/files/:filename', auth, (req: any, res: any) => {
+    const files = (global as any).chatFiles;
+    const filePath = files?.get(req.params.filename);
+    if (!filePath || !existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+    res.sendFile(filePath);
+  });
+
+  // ─── Telegram Sticker Pack Creation ───────────────────────────────────────────
+  app.post('/api/tools/create-sticker-pack', auth, async (req: any, res: any) => {
+    const { bot_token, user_telegram_id, pack_name, pack_title, sticker_urls, emoji = '🎨' } = req.body;
+    if (!bot_token || !user_telegram_id || !pack_name || !sticker_urls?.length) {
+      return res.status(400).json({ error: 'bot_token, user_telegram_id, pack_name, sticker_urls required' });
+    }
+
+    const base = 'https://api.telegram.org/bot' + bot_token;
+    const results: string[] = [];
+
+    try {
+      // Get bot username for pack name
+      const meRes = await fetch(base + '/getMe');
+      const me: any = await meRes.json();
+      const botUsername = me.result?.username || 'dipper_bot';
+      const fullPackName = pack_name.toLowerCase().replace(/[^a-z0-9_]/g,'_') + '_by_' + botUsername;
+
+      // Create the sticker set with first sticker
+      const firstUrl = sticker_urls[0];
+      const createRes = await fetch(base + '/createNewStickerSet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: parseInt(user_telegram_id),
+          name: fullPackName,
+          title: pack_title || pack_name,
+          stickers: [{ sticker: firstUrl, emoji_list: [emoji], format: 'static' }],
+          sticker_format: 'static',
+        }),
+      });
+      const createData: any = await createRes.json();
+      
+      if (!createData.ok) {
+        return res.json({ 
+          success: false, 
+          error: createData.description,
+          pack_url: 'https://t.me/addstickers/' + fullPackName 
+        });
+      }
+      results.push('Pack created: ' + fullPackName);
+
+      // Add remaining stickers
+      for (const stickerUrl of sticker_urls.slice(1)) {
+        try {
+          const addRes = await fetch(base + '/addStickerToSet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_id: parseInt(user_telegram_id),
+              name: fullPackName,
+              sticker: { sticker: stickerUrl, emoji_list: [emoji], format: 'static' },
+            }),
+          });
+          const addData: any = await addRes.json();
+          if (addData.ok) results.push('Added sticker ' + (sticker_urls.indexOf(stickerUrl) + 1));
+        } catch {}
+        await new Promise(r => setTimeout(r, 300));
+      }
+
+      res.json({
+        success: true,
+        pack_name: fullPackName,
+        pack_url: 'https://t.me/addstickers/' + fullPackName,
+        stickers_added: results.length,
+        results,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ─── Platform Guide AI ────────────────────────────────────────────────────
   app.post('/api/platform-guide', async (req: any, res: any) => {
     const { messages } = req.body;
