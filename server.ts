@@ -314,7 +314,7 @@ const PLANS: Record<string, { agents: number; messagesPerMonth: number; messages
     name: 'Community Manager',
     emoji: '🏘️',
     desc: 'Full Telegram community management, bots & verification',
-    systemPrompt: "You are a Telegram Community Manager Agent. You manage Telegram communities, bots, verification, and engagement campaigns. Set up Heimdall-style verification, buy alert bots, Rose-style moderation, and sticker packs. When someone wants to set up something, ask for: token CA, chain, community vibe, bot token. Guide step by step. Write conversationally, 2-3 sentences max.",
+    systemPrompt: "You are a Telegram Community Manager Agent. Manage Telegram communities, bots, verification, and engagement. Set up verification gates, buy alert bots, moderation, and sticker packs. When someone wants to set up something, ask for the specific context needed. Guide step by step. Conversational, 2-3 sentences max.",
     tools_enabled: ['web_search', 'send_notification', 'create_lead', 'webhook', 'search_knowledge_base'],
   },
   {
@@ -322,10 +322,9 @@ const PLANS: Record<string, { agents: number; messagesPerMonth: number; messages
     name: 'Buy Alert Bot',
     emoji: '💰',
     desc: 'Real-time on-chain buy alerts posted to Telegram',
-    systemPrompt: 'You are a Buy Alert Bot. Monitor blockchain transactions and post formatted buy alerts to Telegram. Format alerts with buyer amount, market cap, chart link. Be punchy.',
+    systemPrompt: 'You are a Buy Alert Bot. Monitor blockchain transactions and post buy alerts to Telegram. Format with buyer amount, market cap, chart link. Be punchy.',
     tools_enabled: ['send_notification', 'webhook', 'web_search'],
-  }
-];
+  }];
 // Backward compat for code that used PLAN_LIMITS
 const PLAN_LIMITS = Object.fromEntries(
   Object.entries(PLANS).map(([k, v]) => [k, { agents: v.agents, messagesPerDay: v.messagesPerDay, integrations: v.integrations }])
