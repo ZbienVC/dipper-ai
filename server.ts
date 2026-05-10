@@ -5231,6 +5231,168 @@ async function telegramStickerTool(
 
 
 
+
+  // ─── Community Manager Routes ─────────────────────────────────────────────────
+
+  // Store community config (verification, buy bot settings, etc.)
+  app.post('/api/community/:agentId/config', auth, async (req: any, res: any) => {
+    const agent = findAgent(req.params.agentId, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { verification, buy_bot, moderation, welcome, sticker_pack_owner } = req.body;
+    if (!(agent as any).community_config) (agent as any).community_config = {};
+    Object.assign((agent as any).community_config, { verification, buy_bot, moderation, welcome, sticker_pack_owner });
+    save();
+    res.json({ ok: true, config: (agent as any).community_config });
+  });
+
+  app.get('/api/community/:agentId/config', auth, (req: any, res: any) => {
+    const agent = findAgent(req.params.agentId, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    res.json((agent as any).community_config || {});
+  });
+
+  // Puppet master: send message as bot
+  app.post('/api/community/:agentId/send', auth, async (req: any, res: any) => {
+    const agent = findAgent(req.params.agentId, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { chat_id, text, parse_mode = 'Markdown', photo_url, disable_notification } = req.body;
+    if (!chat_id || (!text && !photo_url)) return res.status(400).json({ error: 'chat_id and text or photo_url required' });
+    const intg = db.data.integrations.find(i => i.user_id === req.userId && i.type === 'telegram' && i.connected && 
+      (i as any).agent_id === req.params.agentId);
+    const anyIntg = db.data.integrations.find(i => i.user_id === req.userId && i.type === 'telegram' && i.connected);
+    const integration = intg || anyIntg;
+    if (!integration) return res.status(400).json({ error: 'No Telegram integration connected' });
+    const { botToken } = decodeCredentials(integration.credentials);
+    if (!botToken) return res.status(400).json({ error: 'No bot token' });
+    try {
+      let r;
+      if (photo_url) {
+        r = await fetch('https://api.telegram.org/bot' + botToken + '/sendPhoto', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id, photo: photo_url, caption: text, parse_mode, disable_notification }),
+        });
+      } else {
+        r = await fetch('https://api.telegram.org/bot' + botToken + '/sendMessage', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id, text, parse_mode, disable_notification }),
+        });
+      }
+      const d: any = await r.json();
+      if (d.ok) {
+        logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'telegram', summary: 'Puppet message sent to ' + chat_id, status: 'success' });
+        res.json({ ok: true, message_id: d.result?.message_id });
+      } else {
+        res.status(400).json({ error: d.description });
+      }
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Schedule broadcast
+  app.post('/api/community/:agentId/broadcast', auth, async (req: any, res: any) => {
+    const agent = findAgent(req.params.agentId, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { chat_ids, text, photo_url, scheduled_at } = req.body;
+    if (!chat_ids?.length || !text) return res.status(400).json({ error: 'chat_ids and text required' });
+    const broadcastId = randomUUID();
+    if (!db.data.broadcasts) db.data.broadcasts = [];
+    db.data.broadcasts.push({
+      id: broadcastId, user_id: req.userId, agent_id: agent.id, agent_name: agent.name,
+      message: text, photo_url, chat_ids, channel: 'telegram',
+      status: scheduled_at ? 'scheduled' : 'pending',
+      scheduled_at, created_at: new Date().toISOString(),
+    });
+    save();
+    res.json({ ok: true, broadcast_id: broadcastId });
+  });
+
+  // Moderation actions (ban, mute, warn)
+  app.post('/api/community/:agentId/moderate', auth, async (req: any, res: any) => {
+    const agent = findAgent(req.params.agentId, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { action, chat_id, user_id: targetUserId, reason, duration_seconds } = req.body;
+    const validActions = ['ban', 'unban', 'mute', 'unmute', 'warn', 'delete'];
+    if (!validActions.includes(action)) return res.status(400).json({ error: 'Invalid action' });
+    const intg = db.data.integrations.find(i => i.user_id === req.userId && i.type === 'telegram' && i.connected);
+    if (!intg) return res.status(400).json({ error: 'No Telegram integration' });
+    const { botToken } = decodeCredentials(intg.credentials);
+    try {
+      let endpoint = '', payload: any = { chat_id, user_id: targetUserId };
+      if (action === 'ban') { endpoint = 'banChatMember'; }
+      else if (action === 'unban') { endpoint = 'unbanChatMember'; payload.only_if_banned = true; }
+      else if (action === 'mute') { 
+        endpoint = 'restrictChatMember'; 
+        payload.permissions = { can_send_messages: false, can_send_media_messages: false };
+        if (duration_seconds) payload.until_date = Math.floor(Date.now()/1000) + duration_seconds;
+      }
+      else if (action === 'unmute') {
+        endpoint = 'restrictChatMember';
+        payload.permissions = { can_send_messages: true, can_send_media_messages: true, can_send_polls: true, can_add_web_page_previews: true };
+      }
+      else if (action === 'warn') {
+        // Send warning message
+        endpoint = 'sendMessage';
+        payload = { chat_id, text: '⚠️ Warning to user ' + targetUserId + (reason ? ': ' + reason : ''), parse_mode: 'Markdown' };
+      }
+      if (endpoint) {
+        const r = await fetch('https://api.telegram.org/bot' + botToken + '/' + endpoint, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        const d: any = await r.json();
+        logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'tool_used', channel: 'telegram', summary: action + ' user ' + targetUserId + (reason ? ': ' + reason : ''), status: d.ok ? 'success' : 'error' });
+        res.json({ ok: d.ok, description: d.description });
+      } else {
+        res.json({ ok: true, note: 'Action logged' });
+      }
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Sticker pack creation (uses user's Telegram account via bot)
+  app.post('/api/community/:agentId/sticker-pack', auth, async (req: any, res: any) => {
+    const agent = findAgent(req.params.agentId, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { bot_token, pack_name, pack_title, sticker_urls, telegram_user_id = '6705481681', emoji = '🎨' } = req.body;
+    if (!bot_token || !pack_name || !sticker_urls?.length) return res.status(400).json({ error: 'bot_token, pack_name, sticker_urls required' });
+    try {
+      const meRes = await fetch('https://api.telegram.org/bot' + bot_token + '/getMe');
+      const me: any = await meRes.json();
+      const botUsername = me.result?.username || 'bot';
+      const fullName = pack_name.toLowerCase().replace(/[^a-z0-9_]/g,'_') + '_by_' + botUsername;
+      // Create pack with first sticker
+      const createRes = await fetch('https://api.telegram.org/bot' + bot_token + '/createNewStickerSet', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: parseInt(telegram_user_id), name: fullName, title: pack_title || pack_name, stickers: [{ sticker: sticker_urls[0], emoji_list: [emoji], format: 'static' }], sticker_format: 'static' }),
+      });
+      const cd: any = await createRes.json();
+      if (!cd.ok) return res.status(400).json({ error: cd.description, pack_url: 'https://t.me/addstickers/' + fullName });
+      // Add remaining stickers
+      for (const url of sticker_urls.slice(1)) {
+        await fetch('https://api.telegram.org/bot' + bot_token + '/addStickerToSet', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: parseInt(telegram_user_id), name: fullName, sticker: { sticker: url, emoji_list: [emoji], format: 'static' } }),
+        });
+        await new Promise(r => setTimeout(r, 300));
+      }
+      res.json({ ok: true, pack_url: 'https://t.me/addstickers/' + fullName, pack_name: fullName });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Get community stats (member count, recent messages, etc.)
+  app.get('/api/community/:agentId/stats', auth, async (req: any, res: any) => {
+    const agent = findAgent(req.params.agentId, req.userId);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    const { chat_id } = req.query;
+    const intg = db.data.integrations.find(i => i.user_id === req.userId && i.type === 'telegram' && i.connected);
+    if (!intg || !chat_id) return res.json({ members: null, note: 'Connect Telegram and provide chat_id to see stats' });
+    const { botToken } = decodeCredentials(intg.credentials);
+    try {
+      const r = await fetch('https://api.telegram.org/bot' + botToken + '/getChatMemberCount?chat_id=' + chat_id);
+      const d: any = await r.json();
+      const cr = await fetch('https://api.telegram.org/bot' + botToken + '/getChat?chat_id=' + chat_id);
+      const cd: any = await cr.json();
+      res.json({ members: d.result, title: cd.result?.title, description: cd.result?.description, invite_link: cd.result?.invite_link });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // ─── Telegram Bot Setup Guide ─────────────────────────────────────────────────
   app.get('/api/integrations/telegram/setup-guide', auth, (req: any, res: any) => {
     const appUrl = process.env.APP_URL || 'https://dipper-ai-production.up.railway.app';
