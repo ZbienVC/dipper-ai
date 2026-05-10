@@ -1862,7 +1862,16 @@ async function startServer() {
     } catch (e: any) {
       console.error('[chat error]', e?.message, e?.status, e?.error);
       logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'error', channel: 'web', summary: 'Error during web chat', status: 'error', error_message: e?.message });
-      res.status(500).json({ error: e?.message || 'AI call failed', details: e?.error || e?.status });
+      // Return friendly error messages instead of raw API errors
+      let friendlyError = 'Something went wrong. Please try again.';
+      if (e?.message?.includes('authentication') || e?.message?.includes('401') || e?.status === 401) {
+        friendlyError = 'API key issue. The AI service needs to be configured. If you are the owner, check your API keys in Railway environment variables.';
+      } else if (e?.message?.includes('rate') || e?.status === 429) {
+        friendlyError = 'Rate limit hit. Give it a moment and try again.';
+      } else if (e?.message?.includes('model') || e?.message?.includes('not found')) {
+        friendlyError = 'This AI model is not available. Try switching to a different model in settings.';
+      }
+      res.status(500).json({ error: friendlyError });
     }
   });
 
@@ -4751,7 +4760,7 @@ async function webSearch(query: string, numResults = 5): Promise<string> {
 // Image Generation: DALL-E 3 via OpenAI
 async function generateImage(prompt: string, size: '1024x1024' | '1792x1024' | '1024x1792' = '1024x1024'): Promise<string> {
   const openaiKey = process.env.OPENAI_API_KEY;
-  if (!openaiKey) return 'Image generation requires OPENAI_API_KEY with DALL-E access.';
+  if (!openaiKey) return 'I need an OpenAI API key to generate images. The owner needs to add OPENAI_API_KEY to Railway environment variables.';
   try {
     const r = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
@@ -4759,12 +4768,14 @@ async function generateImage(prompt: string, size: '1024x1024' | '1792x1024' | '
       body: JSON.stringify({ model: 'dall-e-3', prompt, n: 1, size, quality: 'standard' }),
     });
     const d: any = await r.json();
-    if (d.error) return 'Image generation error: ' + d.error.message;
+    if (d.error?.type === 'invalid_request_error') return 'Image generation failed: ' + d.error.message;
+    if (d.error?.type === 'authentication_error' || d.error?.code === 'invalid_api_key') return 'The OpenAI API key is invalid or expired. The owner needs to update OPENAI_API_KEY in Railway.';
+    if (d.error) return 'Image generation issue: ' + d.error.message;
     const url = d.data?.[0]?.url;
     if (url) return url;
-    return 'Image generation failed — no URL returned.';
+    return 'Image generation failed. Please try again.';
   } catch (e: any) {
-    return 'Image generation error: ' + e.message;
+    return 'Could not connect to image generation service. Please try again in a moment.';
   }
 }
 
