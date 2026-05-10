@@ -371,8 +371,9 @@ export default function AgentDetail() {
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: await (async () => {
               let imgData: string | undefined
-              const f = uploadedFile?.localFile
-              if (f && f.type.startsWith('image/')) {
+              const f = capturedFile  // use captured ref, not state
+              console.log('[img-upload] file captured:', !!f, 'name:', capturedFileName, 'type:', capturedFileType)
+              if (f && capturedFileType.startsWith('image/')) {
                 imgData = await new Promise<string>(resolve => {
                   const canvas = document.createElement('canvas')
                   const img = new Image()
@@ -396,11 +397,12 @@ export default function AgentDetail() {
                   img.src = url
                 })
               }
+              console.log('[img-upload] imgData length:', imgData?.length || 0, 'sending to server')
               return JSON.stringify({
-                message: currentInput + (uploadedFile ? ' [image attached]' : ''),
+                message: currentInput,
                 model: selectedModel,
                 imageData: imgData,
-                imageName: uploadedFile?.name,
+                imageName: capturedFileName,
               })
             })(),
         })
