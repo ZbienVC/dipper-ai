@@ -2860,15 +2860,18 @@ async function startServer() {
             { type: 'text' as const, text: userText }
           ]}
         ];
+        // Claude Haiku doesn't support vision - upgrade to Sonnet for image analysis
+        const visionModel = effectiveModel.includes('haiku') ? 'claude-sonnet-4-5' : effectiveModel;
         const visionResponse = await anthropicVision.messages.create({
-          model: effectiveModel,
+          model: visionModel,
           max_tokens: plan.maxTokens,
           system: finalSystemPrompt + '\n\nCRITICAL writing rules: Write in plain conversational paragraphs only. No markdown headers (no # or ##). No bullet points. No bold asterisks (**text**). No dashes for lists. Just natural flowing sentences like a real person talking.',
           messages: visionMessages,
         });
-        aiResult = { text: (visionResponse.content[0] as any).text, tokensUsed: (visionResponse.usage?.input_tokens || 0) + (visionResponse.usage?.output_tokens || 0) };
+        const visionText = (visionResponse.content[0] as any).text;
+        aiResult = { text: visionText, tokensUsed: (visionResponse.usage?.input_tokens || 0) + (visionResponse.usage?.output_tokens || 0) };
       } else {
-        aiResult = await callAI(agent.provider, agent.model, finalSystemPrompt + '\n\nCRITICAL: No markdown headers, no bullet points, no bold, no dashes. Plain paragraphs only.', history, plan.maxTokens);
+        aiResult = await callAI(activeProvider, effectiveModel, finalSystemPrompt + '\n\nCRITICAL: No markdown headers, no bullet points, no bold, no dashes. Plain paragraphs only.', history, plan.maxTokens);
       }
       const { text: content, tokensUsed } = aiResult;
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: message, created_at: new Date().toISOString() });
