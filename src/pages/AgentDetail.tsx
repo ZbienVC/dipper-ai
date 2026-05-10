@@ -4,7 +4,7 @@ import DashboardLayout from '../components/DashboardLayout'
 import {
   MessageSquare, BarChart2, Settings, BookOpen, Terminal,
   Plug, User, Activity, Edit3, Save, Circle, Send, Bot,
-  Upload, Link2, FileText, Plus, X, Check, Loader2, Globe, Copy, ExternalLink, ToggleLeft, ToggleRight,
+  Upload, Link2, FileText, Plus, X, Check, Loader2, Globe, Copy, ExternalLink, ToggleLeft, ToggleRight, Paperclip, ImageIcon, Sticker,
   Users, Trash2, ChevronRight, Search, Database, AlertCircle, RefreshCw
 } from 'lucide-react'
 
@@ -80,6 +80,9 @@ export default function AgentDetail() {
   const [editForbiddenWords, setEditForbiddenWords] = useState('')
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [inputText, setInputText] = useState('')
+  const [uploadedFile, setUploadedFile] = useState<{ url: string; name: string; type: string } | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [thinking, setThinking] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const [urlInput, setUrlInput] = useState('')
@@ -341,6 +344,32 @@ export default function AgentDetail() {
     navigate('/dashboard/agents')
   }
 
+
+  const handleFileUpload = async (file: File) => {
+    setUploading(true)
+    const token = getToken()
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const res = await fetch('/api/chat/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+      const data = await res.json()
+      if (data.url) {
+        setUploadedFile({ url: data.url, name: file.name, type: file.type })
+        // Auto-add context to input
+        if (file.type.startsWith('image/')) {
+          setInputText(prev => prev || 'I uploaded an image. What can you see and create from this?')
+        }
+      }
+    } catch {
+      // fail silently, file just won't attach
+    }
+    setUploading(false)
+  }
+
   const sendMessage = async () => {
     if (!inputText.trim() || thinking || !agent) return
     const userMsg: ChatMsg = { role: 'user', text: inputText.trim(), ts: getTime() }
@@ -355,7 +384,11 @@ export default function AgentDetail() {
         const res = await fetch(`/api/agents/${id}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ message: currentInput, model: selectedModel }),
+          body: JSON.stringify({ 
+              message: currentInput + (uploadedFile ? `\n\n[User uploaded a file: ${uploadedFile.name}\nFile URL: ${uploadedFile.url}\n${uploadedFile.type.startsWith('image/') ? 'Please analyze this image and help me create content, stickers, or variations from it.' : ''}` : ''), 
+              model: selectedModel,
+              attachments: uploadedFile ? [uploadedFile] : [],
+            }),
         })
         const data = await res.json()
         reply = data.content || data.error || 'Something went wrong.'
@@ -374,6 +407,7 @@ export default function AgentDetail() {
         reply = data.reply || data.error || 'Something went wrong.'
       }
       setMessages(prev => [...prev, { role: 'agent', text: reply, ts: getTime() }])
+      setUploadedFile(null)
     } catch {
       setMessages(prev => [...prev, { role: 'agent', text: 'Sorry, I had trouble responding. Try again.', ts: getTime() }])
     }
@@ -552,11 +586,34 @@ export default function AgentDetail() {
         <div ref={chatEndRef} />
       </div>
       <div className="px-4 py-3 border-t border-[#1e1e2e] bg-[#111118]">
+        <input ref={fileInputRef} type="file" className="hidden" accept="image/*,video/*,.gif,.pdf,.txt"
+          onChange={e => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
+        {uploadedFile && (
+          <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/20">
+            {uploadedFile.type.startsWith('image/') ? <ImageIcon size={14} className="text-violet-400" /> : <Paperclip size={14} className="text-violet-400" />}
+            <span className="text-xs text-violet-300 flex-1 truncate">{uploadedFile.name}</span>
+            <button onClick={() => setUploadedFile(null)} className="text-slate-500 hover:text-white"><X size={12} /></button>
+          </div>
+        )}
+        {/* Sticker pack quick action */}
+        <div className="flex gap-1 mb-2 flex-wrap">
+          {['Create Telegram sticker pack', 'Generate sticker variations', 'Make animated sticker'].map(action => (
+            <button key={action} onClick={() => setInputText(action)}
+              className="text-xs px-2 py-1 rounded-lg bg-white/4 border border-white/8 text-slate-500 hover:text-violet-400 hover:border-violet-500/30 transition-all">
+              {action}
+            </button>
+          ))}
+        </div>
         <div className="flex gap-2 items-center">
-          <input value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()}
+          <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-white/4 border border-white/8 text-slate-500 hover:text-violet-400 hover:border-violet-500/30 transition-all disabled:opacity-40"
+            title="Attach image or file">
+            {uploading ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />}
+          </button>
+          <input value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
             placeholder={`Message ${agent?.name || 'agent'}...`} disabled={thinking}
             className="flex-1 px-4 py-2 rounded-xl bg-white/5 border border-[#1e1e2e] text-sm focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-slate-200 placeholder-slate-600 transition-all disabled:opacity-50" />
-          <button onClick={sendMessage} disabled={!inputText.trim() || thinking}
+          <button onClick={sendMessage} disabled={(!inputText.trim() && !uploadedFile) || thinking}
             className="gradient-btn w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-40">
             <Send size={14} />
           </button>
