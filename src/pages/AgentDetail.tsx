@@ -80,7 +80,7 @@ export default function AgentDetail() {
   const [editForbiddenWords, setEditForbiddenWords] = useState('')
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [inputText, setInputText] = useState('')
-  const [uploadedFile, setUploadedFile] = useState<{ url: string; name: string; type: string } | null>(null)
+  const [uploadedFile, setUploadedFile] = useState<{ url: string; name: string; type: string; localFile?: File } | null>(null)
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [thinking, setThinking] = useState(false)
@@ -346,28 +346,12 @@ export default function AgentDetail() {
 
 
   const handleFileUpload = async (file: File) => {
-    setUploading(true)
-    const token = getToken()
-    const formData = new FormData()
-    formData.append('file', file)
-    try {
-      const res = await fetch('/api/chat/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      })
-      const data = await res.json()
-      if (data.url) {
-        setUploadedFile({ url: data.url, name: file.name, type: file.type })
-        // Auto-add context to input
-        if (file.type.startsWith('image/')) {
-          setInputText(prev => prev || 'I uploaded an image. What can you see and create from this?')
-        }
-      }
-    } catch {
-      // fail silently, file just won't attach
+    // Immediately show preview using local object URL - no server round trip needed
+    const localUrl = URL.createObjectURL(file)
+    setUploadedFile({ url: localUrl, name: file.name, type: file.type, localFile: file })
+    if (file.type.startsWith('image/')) {
+      setInputText(prev => prev || 'Analyze this image and help me create stickers, variations, or content from it.')
     }
-    setUploading(false)
   }
 
   const sendMessage = async () => {
@@ -385,9 +369,15 @@ export default function AgentDetail() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ 
-              message: currentInput + (uploadedFile ? `\n\n[User uploaded a file: ${uploadedFile.name}\nFile URL: ${uploadedFile.url}\n${uploadedFile.type.startsWith('image/') ? 'Please analyze this image and help me create content, stickers, or variations from it.' : ''}` : ''), 
+              message: currentInput + (uploadedFile ? `\n\n[Attached file: ${uploadedFile.name} (${uploadedFile.type})]` : ''),
               model: selectedModel,
-              attachments: uploadedFile ? [uploadedFile] : [],
+              imageData: uploadedFile?.localFile && uploadedFile.type.startsWith('image/') ? await (() => {
+                return new Promise<string>((resolve) => {
+                  const reader = new FileReader()
+                  reader.onload = () => resolve(reader.result as string)
+                  reader.readAsDataURL(uploadedFile.localFile!)
+                })
+              })() : undefined,
             }),
         })
         const data = await res.json()
@@ -589,10 +579,27 @@ export default function AgentDetail() {
         <input ref={fileInputRef} type="file" className="hidden" accept="image/*,video/*,.gif,.pdf,.txt"
           onChange={e => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
         {uploadedFile && (
-          <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/20">
-            {uploadedFile.type.startsWith('image/') ? <ImageIcon size={14} className="text-violet-400" /> : <Paperclip size={14} className="text-violet-400" />}
-            <span className="text-xs text-violet-300 flex-1 truncate">{uploadedFile.name}</span>
-            <button onClick={() => setUploadedFile(null)} className="text-slate-500 hover:text-white"><X size={12} /></button>
+          <div className="mb-2 p-2 rounded-xl bg-violet-500/8 border border-violet-500/25">
+            {uploadedFile.type.startsWith('image/') ? (
+              <div className="flex items-start gap-3">
+                <img src={uploadedFile.url} alt={uploadedFile.name} 
+                  className="w-16 h-16 object-cover rounded-lg border border-violet-500/30 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-violet-300">Image attached</span>
+                    <button onClick={() => setUploadedFile(null)} className="text-slate-500 hover:text-red-400 transition-colors"><X size={12} /></button>
+                  </div>
+                  <span className="text-xs text-slate-500 block truncate mt-0.5">{uploadedFile.name}</span>
+                  <span className="text-xs text-violet-400 mt-1 block">Agent will analyze this image</span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Paperclip size={14} className="text-violet-400" />
+                <span className="text-xs text-violet-300 flex-1 truncate">{uploadedFile.name}</span>
+                <button onClick={() => setUploadedFile(null)} className="text-slate-500 hover:text-white"><X size={12} /></button>
+              </div>
+            )}
           </div>
         )}
         {/* Sticker pack quick action */}
