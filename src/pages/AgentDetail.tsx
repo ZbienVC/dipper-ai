@@ -356,9 +356,9 @@ export default function AgentDetail() {
   }
 
   const sendMessage = async () => {
-    if (!inputText.trim() || thinking || !agent) return
-    const userMsg: ChatMsg = { role: 'user', text: inputText.trim(), ts: getTime() }
-    const currentInput = inputText.trim()
+    if ((!inputText.trim() && !uploadedFile) || thinking || !agent) return
+    const userMsg: ChatMsg = { role: 'user', text: (inputText.trim() || 'Analyze this image') + (uploadedFile ? ' 📎' : ''), ts: getTime() }
+    const currentInput = inputText.trim() || (uploadedFile ? 'Analyze this image. What do you see? Describe it in detail then suggest sticker and content ideas.' : '')
     const token = getToken()
     setMessages(prev => [...prev, userMsg])
     setInputText('')
