@@ -150,6 +150,7 @@ export default function AgentDetail() {
   const chatEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadedFile, setUploadedFile] = useState<{ url: string; name: string; type: string; base64?: string } | null>(null)
+  const [conversationId, setConversationId] = useState<string | undefined>(undefined)
 
   const handleFileUpload = async (file: File) => {
     const localUrl = URL.createObjectURL(file)
@@ -444,12 +445,19 @@ export default function AgentDetail() {
 
   const sendMessage = async () => {
     if ((!inputText.trim() && !uploadedFile) || thinking || !agent) return
-    // base64 is pre-computed in state from handleFileUpload
+    // Capture everything BEFORE any state changes
     const capturedBase64 = uploadedFile?.base64 || null
     const capturedFileName = uploadedFile?.name || ''
     const capturedFileType = uploadedFile?.type || ''
-    console.log('[send] base64 present:', !!capturedBase64, 'length:', capturedBase64?.length || 0)
-    const userMsg: ChatMsg = { role: 'user', text: inputText.trim(), ts: getTime() }
+    const capturedImageUrl = uploadedFile?.url || null  // for showing in chat bubble
+    const hasAttachment = !!uploadedFile
+    // Build user message WITH imageUrl so it shows as photo bubble in chat
+    const userMsg: ChatMsg = { 
+      role: 'user', 
+      text: inputText.trim() || (hasAttachment ? '' : ''),
+      ts: getTime(),
+      imageUrl: capturedImageUrl || undefined,
+    }
     const currentInput = inputText.trim()
     const token = getToken()
     setMessages(prev => [...prev, userMsg])
@@ -470,11 +478,14 @@ export default function AgentDetail() {
                 model: selectedModel,
                 imageData: imgData,
                 imageName: capturedFileName,
+                conversationId: conversationId, // maintain conversation context
               })
             })(),
         })
         const data = await res.json()
         reply = data.content || data.error || 'Something went wrong.'
+        // Store conversationId to maintain context across messages
+        if (data.conversationId) setConversationId(data.conversationId)
       } else {
         const res = await fetch('/api/chat', {
           method: 'POST',
@@ -571,7 +582,7 @@ export default function AgentDetail() {
         <div className="flex items-center gap-2 shrink-0">
           <ModelPicker value={selectedModel} onChange={setSelectedModel} />
           <button
-            onClick={() => { const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); setMessages([{ role: 'agent', text: 'Conversation cleared. How can I help you?', ts: t }]); }}
+            onClick={() => { const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); setMessages([{ role: 'agent', text: 'Conversation cleared. How can I help you?', ts: t }]); setConversationId(undefined); }}
             className="w-7 h-7 rounded-lg border border-[#1e1e2e] text-slate-600 hover:text-red-400 hover:bg-red-500/8 hover:border-red-500/20 transition-all flex items-center justify-center"
             title="Clear conversation">
             <Trash2 size={12} />
