@@ -121,7 +121,7 @@ export default function AgentDetail() {
       console.log('[upload] base64 ready, length:', base64?.length, 'starts:', base64?.slice(0, 30))
     }
     setUploadedFile({ url: localUrl, name: file.name, type: file.type, base64 })
-    setInputText('Analyze this image. Describe exactly what you see.')
+    // Don't auto-fill input - user types their own instruction
   }
   const [urlInput, setUrlInput] = useState('')
   const [knowledgeDragOver, setKnowledgeDragOver] = useState(false)
