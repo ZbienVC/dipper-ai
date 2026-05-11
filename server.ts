@@ -1815,7 +1815,8 @@ async function startServer() {
     const imageHint = imageData && (req.body as any).imageName 
       ? ` [User attached image: ${(req.body as any).imageName}]`
       : '';
-    history.push({ role: 'user', content: messageWithImage + imageHint });
+    // Push clean user message to history (image content handled via vision API separately)
+    history.push({ role: 'user', content: message });
 
     const plan = PLANS[req.user.plan] || PLANS.free;
     const startTime = Date.now();
@@ -1852,8 +1853,9 @@ async function startServer() {
     let tokensUsed: number;
     console.log('[auth-chat] imageData present:', !!imageData, 'length:', imageData?.length || 0, 'provider:', activeProvider, 'model:', effectiveModel);
     if (imageData && activeProvider === 'anthropic') {
-      console.log('[auth-chat] USING VISION API');
+      console.log('[auth-chat] USING VISION API - imageData length:', imageData.length);
       const anthropicVisionClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      if (!process.env.ANTHROPIC_API_KEY) { throw new Error('ANTHROPIC_API_KEY not set in environment'); }
       const base64Data = imageData.replace(/^data:image\/[^;]+;base64,/, '');
       const mimeMatch = imageData.match(/^data:(image\/[^;]+);/);
       const mediaType = (mimeMatch?.[1] || 'image/jpeg') as any;
@@ -1880,7 +1882,7 @@ async function startServer() {
       });
       rawContent = (visionResp.content[0] as any).text;
       tokensUsed = (visionResp.usage?.input_tokens || 0) + (visionResp.usage?.output_tokens || 0);
-      console.log('[auth-chat] Vision response length:', rawContent.length);
+      console.log('[auth-chat] Vision SUCCESS - response length:', rawContent.length);
     } else {
       const aiRes = await callAI(activeProvider, effectiveModel, finalSystemPrompt, history, plan.maxTokens);
       rawContent = aiRes.text;
