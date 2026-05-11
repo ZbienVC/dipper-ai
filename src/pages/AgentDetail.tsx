@@ -478,8 +478,12 @@ export default function AgentDetail() {
     try {
       let reply: string
       if (token) {
+        // Use 90s timeout for image generation (DALL-E can be slow)
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 90000)
         const res = await fetch(`/api/agents/${id}/chat`, {
           method: 'POST',
+          signal: controller.signal,
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: (() => {
               // base64 already computed in handleFileUpload - just use it
@@ -494,6 +498,7 @@ export default function AgentDetail() {
               })
             })(),
         })
+        clearTimeout(timeoutId)
         const data = await res.json()
         reply = data.content || data.error || 'Something went wrong.'
         // Store conversationId to maintain context across messages
