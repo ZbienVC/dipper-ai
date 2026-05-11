@@ -509,6 +509,9 @@ function cleanAgentResponse(text: string): string {
     .replace(/I'll show you (shortly|in a moment|soon)[^.!]*[.!]/gi, '')
     .replace(/working on (it|generating|creating)[^.!]*[.!]/gi, '')
     .replace(/generating (these|those|the|your)[^.!]*[.!]/gi, '')
+    .replace(/createtelegramsticker\s*\([^)]*\)/gi, '')
+    .replace(/generate_image\s*\([^)]*\)/gi, '')
+    .replace(/TOOL:[a-z_]+\s*\([^)]*\)/gi, '')
     // Strip XML/function_call leakage
     .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '')
     .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
@@ -1906,6 +1909,17 @@ async function startServer() {
 
     // Parse and execute any tool calls in the response
     let content = rawContent;
+    // Intercept when Claude outputs tool call syntax directly (e.g. createtelegramsticker("..."))
+    const inlineMatch = rawContent.match(/(?:createtelegramsticker|generate_image)\s*\(['"]*([^'")(]+)['"]*\)/i);
+    if (inlineMatch && canGenerateImages) {
+      try {
+        const inlinePrompt = inlineMatch[1] || message.slice(0, 300);
+        const iUrl = await generateImage(inlinePrompt.slice(0, 500));
+        if (iUrl.startsWith('http')) {
+          content = rawContent.replace(inlineMatch[0], '').trim() + '\n\n' + iUrl;
+        }
+      } catch(ie) { console.error('[inline-tool]', ie); }
+    }
 
     // Keyword intent detection - auto-fire tools based on message keywords
     const msgL = message.toLowerCase();
@@ -5608,6 +5622,27 @@ async function telegramStickerTool(
     }
   });
 
+
+  // Auto-fix agent tools based on template
+  app.post('/api/admin/fix-agent-tools', auth, (req: any, res: any) => {
+    if (req.user.email !== ADMIN_EMAIL && req.user.plan !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const TM: Record<string, string[]> = {
+      'creative-director': ['generate_image', 'web_search', 'create_telegram_sticker', 'search_knowledge_base'],
+      'content-creator': ['generate_image', 'web_search', 'send_email'],
+      'research-agent': ['web_search', 'search_knowledge_base', 'calculate'],
+      'personal-assistant': ['web_search', 'send_email', 'search_knowledge_base', 'get_time'],
+      'sales-outreach': ['send_email', 'create_lead', 'web_search'],
+      'community-manager': ['web_search', 'send_notification', 'create_lead', 'webhook'],
+      'buy-bot': ['send_notification', 'webhook', 'web_search'],
+    };
+    let n = 0;
+    db.data.agents.filter((a: any) => a.user_id === req.userId).forEach((a: any) => {
+      const t = TM[a.template_id || ''] || ['web_search', 'generate_image'];
+      if (JSON.stringify(a.tools_enabled || []) !== JSON.stringify(t)) { a.tools_enabled = t; n++; }
+    });
+    if (n > 0) save();
+    res.json({ fixed: n });
+  });
   // ─── Platform Guide AI ────────────────────────────────────────────────────
   app.post('/api/platform-guide', async (req: any, res: any) => {
     const { messages } = req.body;
