@@ -1781,12 +1781,12 @@ async function startServer() {
     const rawHistory = db.data.messages.filter(m => m.conversation_id === convId);
     const imageDescriptions = rawHistory
       .filter(m => m.content.includes('[IMAGE ANALYZED:'))
-      .map(m => { const match = m.content.match(/\[IMAGE ANALYZED: ([^\]]{1,500})/); return match?.[1] || ''; })
+      .map(m => { const match = m.content.match(/\[IMAGE ANALYZED: ([^\]]*)/); return (match?.[1] || '').slice(0, 500); })
       .filter(Boolean);
     const history = rawHistory.map(m => ({ role: m.role, content: m.content }));
     // Add image context to system prompt if there are previous image analyses
     const imageCtxAddition = imageDescriptions.length > 0 && !imageData
-      ? `\n\n## Previously Analyzed Images In This Conversation\nThe user has shared images that you analyzed. Here is what you saw:\n${imageDescriptions.map((d, i) => (i+1) + '. ' + d).join('\n')}\n\nWhen the user says "this image", "this character", "this meme" or similar, they are referring to the most recently analyzed image above. Use this context to fulfill their requests without asking them to re-upload.\n`
+      ? `\n\nCRITICAL IMAGE CONTEXT: The user previously shared an image which you analyzed in this conversation. You MUST use this context. Do NOT say you cannot see an image or ask them to upload one again.\n\nImage description from earlier in this conversation: "${imageDescriptions[imageDescriptions.length - 1]}"\n\nWhen the user refers to "this image", "this character", "this meme", "this", or makes any reference to previously shared visual content, use the above description to fulfill their request.`
       : '';
     // Include image context if provided
     const imageName = (req.body as any).imageName || 'image';
@@ -1839,10 +1839,15 @@ async function startServer() {
       const base64Data = imageData.replace(/^data:image\/[^;]+;base64,/, '');
       const mimeMatch = imageData.match(/^data:(image\/[^;]+);/);
       const mediaType = (mimeMatch?.[1] || 'image/jpeg') as any;
-      const lastMsg = history[history.length - 1];
-      const userText = (lastMsg?.content || '').replace(/\[.*?\]/g, '').trim() || 'Describe this image in detail.';
+      // Use the actual user message (not history which may have annotations stripped)
+      const userText = message.replace(/\[.*?\]/g, '').trim() || 'Describe this image in detail. Tell me what you see.';
+      // Build vision history - clean annotations from previous messages
+      const cleanHistory = history.slice(0, -1).map((m: any) => ({
+        role: m.role as any,
+        content: m.content.replace(/\[IMAGE ANALYZED:[^\]]*\]/g, '').replace(/\[The user has uploaded[^\]]*\]/g, '').replace(/\[User attached:[^\]]*\]/g, '').trim() || m.content,
+      }));
       const visionMsgs = [
-        ...history.slice(0, -1).map((m: any) => ({ role: m.role as any, content: m.content })),
+        ...cleanHistory,
         { role: 'user' as const, content: [
           { type: 'image' as const, source: { type: 'base64' as const, media_type: mediaType, data: base64Data } },
           { type: 'text' as const, text: userText }
@@ -2981,9 +2986,11 @@ async function startServer() {
         aiResult = await callAI(activeProvider, effectiveModel, finalSystemPrompt + '\n\nSTRICT: 1-3 sentences max. No lists, dashes, bullets, headers or bold. Direct and conversational.', history, plan.maxTokens);
       }
       const { text: content, tokensUsed } = aiResult;
-      // Store user message - if image was analyzed, append description to message text for future context
-      const userMsgContent = imageData && content
-        ? message + ` [IMAGE ANALYZED: ${content.slice(0, 300)}]`
+      // Store user message with image description for conversation memory
+      // Use the vision response (content/rawContent) as the image description
+      const imageDesc = imageData && rawContent ? rawContent.slice(0, 400) : '';
+      const userMsgContent = imageDesc
+        ? message + ' [IMAGE ANALYZED: ' + imageDesc + ']'
         : message;
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: userMsgContent, created_at: new Date().toISOString() });
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: agent.model, created_at: new Date().toISOString() });
