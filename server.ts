@@ -1860,7 +1860,7 @@ async function startServer() {
       const mimeMatch = imageData.match(/^data:(image\/[^;]+);/);
       const mediaType = (mimeMatch?.[1] || 'image/jpeg') as any;
       // Use the actual user message (not history which may have annotations stripped)
-      const userText = message.replace(/\[.*?\]/g, '').trim() || 'Describe this image in detail. Tell me what you see.';
+      const userText = (message || '').replace(/\[.*?\]/g, '').trim() || 'Describe this image in detail. What do you see? Be specific about colors, subjects, and content.';
       // Build vision history - clean annotations from previous messages
       const cleanHistory = history.slice(0, -1).map((m: any) => ({
         role: m.role as any,
