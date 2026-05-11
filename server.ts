@@ -1895,40 +1895,6 @@ async function startServer() {
         tokensUsed = fallback.tokensUsed;
       }
     } else {
-    if (imageData && activeProvider === 'anthropic') {
-      console.log('[auth-chat] USING VISION API - imageData length:', imageData.length);
-      const anthropicVisionClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-      if (!process.env.ANTHROPIC_API_KEY) { throw new Error('ANTHROPIC_API_KEY not set in environment'); }
-      const base64Data = imageData.replace(/^data:image\/[^;]+;base64,/, '');
-      const mimeMatch = imageData.match(/^data:(image\/[^;]+);/);
-      const mediaType = (mimeMatch?.[1] || 'image/jpeg') as any;
-      // Use the actual user message (not history which may have annotations stripped)
-      const userText = (message || '').replace(/\[.*?\]/g, '').trim() || 'Describe this image in detail. What do you see? Be specific about colors, subjects, and content.';
-      // Build clean vision history - no empty messages, strip all annotations
-      const cleanHistory = history.slice(0, -1)
-        .map((m: any) => {
-          const c = m.content.replace(/\[IMAGE[^\]]*\]/g,"").replace(/\[The user[^\]]*\]/g,"").replace(/\[User[^\]]*\]/g,"").trim();
-          return { role: m.role as any, content: c.length > 0 ? c.slice(0,2000) : null };
-        })
-        .filter((m: any) => m.content !== null);
-      const visionMsgs = [
-        ...cleanHistory,
-        { role: 'user' as const, content: [
-          { type: 'image' as const, source: { type: 'base64' as const, media_type: mediaType, data: base64Data } },
-          { type: 'text' as const, text: userText }
-        ]}
-      ];
-      const visionModel = effectiveModel.includes('haiku') ? 'claude-sonnet-4-5' : effectiveModel;
-      const visionResp = await anthropicVisionClient.messages.create({
-        model: visionModel,
-        max_tokens: plan.maxTokens,
-        system: finalSystemPrompt + '\n\nSTRICT: 2-3 sentences max. No bullet points, no dashes, no markdown. Describe what you see conversationally.',
-        messages: visionMsgs,
-      });
-      rawContent = (visionResp.content[0] as any).text;
-      tokensUsed = (visionResp.usage?.input_tokens || 0) + (visionResp.usage?.output_tokens || 0);
-      console.log('[auth-chat] Vision SUCCESS - response length:', rawContent.length);
-    } else {
       const aiRes = await callAI(activeProvider, effectiveModel, finalSystemPrompt, history, plan.maxTokens);
       rawContent = aiRes.text;
       tokensUsed = aiRes.tokensUsed;
