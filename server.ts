@@ -18,7 +18,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const JWT_SECRET = process.env.JWT_SECRET || 'dipperai-dev-secret';
 const PORT = parseInt(process.env.PORT || '3001');
 
-// v2.1.0 - vision, image gen, memory, community hub
 // ─── Database ──────────────────────────────────────────────────────────────────
 type User = {
   id: string; email: string; username: string; password_hash: string;
@@ -1828,8 +1827,6 @@ async function startServer() {
       : '';
     // Push clean user message to history
     history.push({ role: 'user', content: message });
-    // SAFETY: wrap everything in outer try/catch so nothing escapes as HTML 500
-    const runHandler = async (): Promise<void> => { try {
 
     const plan = PLANS[req.user.plan] || PLANS.free;
     const startTime = Date.now();
@@ -2138,9 +2135,7 @@ async function startServer() {
       }
       save();
       logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'message_sent', channel: 'web', summary: 'Replied to web chat message', details: content.slice(0, 200), model_used: effectiveModel, tokens_used: tokensUsed, latency_ms, status: 'success' });
-      res.json({ content: cleanAgentResponse(content), conversationId: convId, model_used: effectiveModel }); } catch (outerErr: any) { console.error('[outer-handler]', outerErr?.message); if (!res.headersSent) res.status(500).json({ error: outerErr?.message || 'Handler failed', details: String(outerErr) }); } };
-    runHandler();
-    return;
+      res.json({ content: cleanAgentResponse(content), conversationId: convId, model_used: effectiveModel });
     } catch (e: any) {
       console.error('[chat error]', e?.message, e?.status, e?.error);
       logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'error', channel: 'web', summary: 'Error during web chat', status: 'error', error_message: e?.message });
