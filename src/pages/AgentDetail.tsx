@@ -503,6 +503,27 @@ export default function AgentDetail() {
         reply = data.content || data.error || 'Something went wrong.'
         // Store conversationId to maintain context across messages
         if (data.conversationId) setConversationId(data.conversationId)
+        
+        // Client-side image generation: if response mentions generating but has no URLs,
+        // and the original request was for stickers/images, generate client-side
+        const wantedImages = (currentInput || '').toLowerCase().includes('sticker') || (currentInput || '').toLowerCase().includes('generat') || !!capturedBase64
+        const hasUrls = reply.includes('https://oaidalle') || reply.includes('https://') 
+        if (wantedImages && !hasUrls && data.conversationId) {
+          try {
+            setThinkingAction('generating')
+            const prompt = reply.slice(0, 200) + ' telegram sticker style, cartoon, bold outlines, transparent background'
+            const genBody = JSON.stringify({ prompt, size: '1024x1024' })
+            const genRes = await fetch('/api/tools/generate-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: genBody,
+            })
+            const genData = await genRes.json()
+            if (genData.url && genData.is_image) {
+              reply = reply + '\n\n' + genData.url
+            }
+          } catch(ge) { console.error('[client-gen]', ge) }
+        }
       } else {
         const res = await fetch('/api/chat', {
           method: 'POST',
