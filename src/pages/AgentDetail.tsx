@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useEffect, useCallback } from 'react'
+﻿import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import {
@@ -51,6 +51,66 @@ function getToken() {
 }
 
 const inputClass = "w-full px-4 py-2.5 rounded-xl bg-white/5 border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white placeholder-slate-600 text-sm transition-all"
+
+
+const MODELS_DATA = [
+  { id: 'claude-sonnet-4-5', label: 'Sonnet 3.5', tag: '👁 Vision', desc: 'Best all-rounder. Balanced speed, quality and image analysis.', provider: 'Anthropic' },
+  { id: 'claude-haiku-4-5', label: 'Haiku 3', tag: '⚡ Fastest', desc: 'Cheapest and fastest. Text only, no image support.', provider: 'Anthropic' },
+  { id: 'claude-opus-4-5', label: 'Opus', tag: '👁 Deepest', desc: 'Most powerful reasoning. Best for complex research and long docs.', provider: 'Anthropic' },
+  { id: 'gpt-4o', label: 'GPT-4o', tag: '👁 Vision', desc: 'Great for code, data and structured output. Supports images.', provider: 'OpenAI' },
+  { id: 'gpt-4o-mini', label: 'GPT-4o Mini', tag: '💡 Affordable', desc: 'Good writing and outreach at lower cost. Text only.', provider: 'OpenAI' },
+  { id: 'gemini-1.5-flash', label: 'Gemini Flash', tag: '📄 Long docs', desc: 'Huge context window. Best for very long documents.', provider: 'Google' },
+]
+
+function ModelPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = React.useState(false)
+  const current = MODELS_DATA.find(m => m.id === value) || MODELS_DATA[0]
+  const ref = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  return (
+    <div ref={ref} className="relative shrink-0" style={{ minWidth: 130 }}>
+      {/* Closed state - compact pill */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0d0d15] border border-[#1e1e2e] text-white text-xs hover:border-violet-500/30 transition-all w-full"
+      >
+        <span className="font-semibold truncate">{current.label}</span>
+        <span className="text-[10px] text-violet-400 shrink-0">{current.tag.split(' ')[0]}</span>
+        <svg className="ml-auto shrink-0 text-slate-500" style={{ rotate: open ? '180deg' : '0deg', transition: 'rotate 0.15s' }} width="10" height="10" viewBox="0 0 10 10"><path d="M1 3l4 4 4-4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>
+      </button>
+
+      {/* Open state - full detail dropdown */}
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 w-72 rounded-xl overflow-hidden shadow-2xl"
+          style={{ background: '#0f0f1a', border: '1px solid rgba(255,255,255,0.08)' }}>
+          {MODELS_DATA.map(m => (
+            <button
+              key={m.id}
+              onClick={() => { onChange(m.id); setOpen(false) }}
+              className="w-full flex items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-white/4"
+              style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className={`text-sm font-semibold ${m.id === value ? 'text-violet-400' : 'text-white'}`}>{m.label}</span>
+                  <span className="text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5 shrink-0">{m.tag}</span>
+                  {m.id === value && <span className="ml-auto text-[10px] text-violet-400">● Active</span>}
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">{m.desc}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function AgentDetail() {
   const { id = '' } = useParams<{ id: string }>()
@@ -509,23 +569,7 @@ export default function AgentDetail() {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
-            className="px-2 py-1 rounded-lg bg-[#0d0d15] border border-[#1e1e2e] text-white text-xs focus:outline-none focus:ring-1 focus:ring-violet-500/40 shrink-0"
-            style={{ maxWidth: 140 }}
-            title="Select AI model — models with 👁 can analyze images">
-            <optgroup label="Anthropic Claude">
-              <option value="claude-sonnet-4-5">Sonnet 3.5 👁</option>
-              <option value="claude-haiku-4-5">Haiku 3 ⚡</option>
-              <option value="claude-opus-4-5">Opus 👁</option>
-            </optgroup>
-            <optgroup label="OpenAI GPT">
-              <option value="gpt-4o">GPT-4o 👁</option>
-              <option value="gpt-4o-mini">GPT-4o Mini</option>
-            </optgroup>
-            <optgroup label="Google">
-              <option value="gemini-1.5-flash">Gemini Flash</option>
-            </optgroup>
-          </select>
+          <ModelPicker value={selectedModel} onChange={setSelectedModel} />
           <button
             onClick={() => { const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); setMessages([{ role: 'agent', text: 'Conversation cleared. How can I help you?', ts: t }]); }}
             className="w-7 h-7 rounded-lg border border-[#1e1e2e] text-slate-600 hover:text-red-400 hover:bg-red-500/8 hover:border-red-500/20 transition-all flex items-center justify-center"
