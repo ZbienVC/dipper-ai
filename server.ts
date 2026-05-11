@@ -503,8 +503,12 @@ async function callAI(provider: string, model: string, systemPrompt: string, mes
 // Strip leaked tool call XML and clean up response for display
 function cleanAgentResponse(text: string): string {
   let clean = text
-    // Strip common AI slop openers
+    // Strip common AI slop openers and empty promises
     .replace(/^(Analyzing[^!]*!\s*|Great[^!]*!\s*|Sure[^!]*!\s*|Absolutely[^!]*!\s*|Of course[^!]*!\s*|I'd be happy[^!]*!\s*)/i, '')
+    .replace(/give me a (few|moment|minute|second)[^.!]*[.!]/gi, '')
+    .replace(/I'll show you (shortly|in a moment|soon)[^.!]*[.!]/gi, '')
+    .replace(/working on (it|generating|creating)[^.!]*[.!]/gi, '')
+    .replace(/generating (these|those|the|your)[^.!]*[.!]/gi, '')
     // Strip XML/function_call leakage
     .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '')
     .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
@@ -1905,12 +1909,53 @@ async function startServer() {
 
     // Keyword intent detection - auto-fire tools based on message keywords
     const msgL = message.toLowerCase();
-    if (agentTools.includes('generate_image') && !imageData &&
-        (msgL.includes('generat') || msgL.includes('creat') || msgL.includes('draw') || msgL.includes('make') || msgL.includes('design')) &&
-        (msgL.includes('image') || msgL.includes('sticker') || msgL.includes('meme') || msgL.includes('picture') || msgL.includes('logo') || msgL.includes('illustration'))) {
+    // Detect sticker/image generation requests - fire DALL-E immediately
+    const wantsImageGen = agentTools.includes('generate_image') && !imageData && (
+      // Explicit creation requests
+      ((msgL.includes('generat') || msgL.includes('creat') || msgL.includes('draw') || msgL.includes('make') || msgL.includes('design') || msgL.includes('build')) &&
+       (msgL.includes('image') || msgL.includes('sticker') || msgL.includes('meme') || msgL.includes('picture') || msgL.includes('logo') || msgL.includes('illustration') || msgL.includes('gif') || msgL.includes('pack'))) ||
+      // Sticker pack requests
+      (msgL.includes('sticker') && (msgL.includes('pack') || msgL.includes('telegram') || msgL.includes('make') || msgL.includes('create') || msgL.includes('generate'))) ||
+      // "show me" / "let me see" requests
+      (msgL.includes('show') && (msgL.includes('sticker') || msgL.includes('meme') || msgL.includes('image')))
+    );
+    if (wantsImageGen) {
       try {
-        const genUrl = await generateImage(message.slice(0, 400));
-        if (genUrl.startsWith('http')) content = rawContent + '\n\n' + genUrl;
+        // Build a good prompt from the request + any image context
+        const convCtxRec = db.data.conversations.find((c: any) => c.id === convId);
+        const imgCtx = (convCtxRec as any)?.image_context?.slice(-1)?.[0] || '';
+        const basePrompt = imgCtx 
+          ? `Telegram sticker style image based on this character: ${imgCtx.slice(0, 200)}. Style: white/transparent background, bold cartoon outlines, expressive face, simple clean design. ${message.slice(0, 100)}`
+          : message.slice(0, 400);
+        
+        // Check if requesting a pack (multiple stickers)
+        const wantsPack = msgL.includes('pack') || (msgL.includes('sticker') && /\d+/.test(msgL));
+        const count = wantsPack ? Math.min(parseInt(msgL.match(/\d+/)?.[0] || '3'), 5) : 1;
+        
+        const generatedUrls: string[] = [];
+        const situations = wantsPack ? [
+          'looking shocked with wide eyes',
+          'flexing muscles confidently', 
+          'laughing hysterically',
+          'crying dramatically',
+          'giving thumbs up'
+        ] : [''];
+        
+        for (let si = 0; si < count; si++) {
+          const prompt = wantsPack 
+            ? `${basePrompt}, character is ${situations[si]}, telegram sticker style, white background, bold outlines`
+            : basePrompt;
+          const url = await generateImage(prompt.slice(0, 500));
+          if (url.startsWith('http')) generatedUrls.push(url);
+          if (si < count - 1) await new Promise(r => setTimeout(r, 500)); // rate limit
+        }
+        
+        if (generatedUrls.length > 0) {
+          const imageSection = generatedUrls.map((url, i) => 
+            wantsPack ? `Sticker ${i+1}: ${url}` : url
+          ).join('\n');
+          content = rawContent.replace(/give me a few minutes/gi, "here you go").replace(/i'll show you shortly/gi, "") + '\n\n' + imageSection;
+        }
       } catch (e) { console.error('[intent-img]', e); }
     }
     if (agentTools.includes('web_search') && !imageData &&
