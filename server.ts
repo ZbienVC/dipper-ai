@@ -503,18 +503,8 @@ async function callAI(provider: string, model: string, systemPrompt: string, mes
 // Strip leaked tool call XML and clean up response for display
 function cleanAgentResponse(text: string): string {
   let clean = text
-    // Strip common AI slop openers and empty promises
+    // Strip common AI slop openers
     .replace(/^(Analyzing[^!]*!\s*|Great[^!]*!\s*|Sure[^!]*!\s*|Absolutely[^!]*!\s*|Of course[^!]*!\s*|I'd be happy[^!]*!\s*)/i, '')
-    .replace(/give me a (few|moment|minute|second)[^.!]*[.!]/gi, '')
-    .replace(/I'll show you (shortly|in a moment|soon)[^.!]*[.!]/gi, '')
-    .replace(/working on (it|generating|creating)[^.!]*[.!]/gi, '')
-    .replace(/generating (these|those|the|your)[^.!]*[.!]/gi, '')
-    .replace(/createtelegramsticker\s*\([^)]*\)/gi, '')
-    .replace(/generate_image\s*\([^)]*\)/gi, '')
-    .replace(/TOOL:[a-z_]+\s*\([^)]*\)/gi, '')
-    .replace(/createtelegramsticker\s*\([^)]*\)/gi, '')
-    .replace(/generate_image\s*\([^)]*\)/gi, '')
-    .replace(/TOOL:[a-z_]+\s*\([^)]*\)/gi, '')
     // Strip XML/function_call leakage
     .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '')
     .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
@@ -1825,13 +1815,11 @@ async function startServer() {
     const imageHint = imageData && (req.body as any).imageName 
       ? ` [User attached image: ${(req.body as any).imageName}]`
       : '';
-    // Push clean user message to history
+    // Push clean user message to history (image content handled via vision API separately)
     history.push({ role: 'user', content: message });
 
     const plan = PLANS[req.user.plan] || PLANS.free;
     const startTime = Date.now();
-    
-    
     try {
       const memoryContext = buildMemoryContext(agent.id, req.userId, 'web');
       const knowledgeContext = buildKnowledgeContext(agent.id, message);
@@ -1841,32 +1829,6 @@ async function startServer() {
     const agentTools: string[] = (agent as any).tools_enabled || [];
     
     // Tool definitions injected into system prompt
-    // Early image generation for explicit sticker/image requests
-    // Run this BEFORE the slow AI call to avoid timeouts
-    const isExplicitImageRequest = canGenerateImages && (
-      msgL.includes('sticker') || msgL.includes('generate image') || msgL.includes('create image') ||
-      msgL.includes('draw') || (msgL.includes('make') && msgL.includes('image'))
-    );
-    let preGeneratedUrls: string[] = [];
-    if (isExplicitImageRequest) {
-      try {
-        const convRec2 = db.data.conversations.find((c: any) => c.id === convId);
-        const imgCtx2: string = (convRec2 as any)?.image_context?.slice(-1)?.[0] || '';
-        const baseP = imgCtx2
-          ? 'Telegram sticker, cartoon style, transparent background, bold outlines. Character: ' + imgCtx2.slice(0, 150) + '. ' + message.slice(0, 100)
-          : message.slice(0, 400);
-        const cntM = message.match(/(\d+)\s*(sticker|image)/i);
-        const cnt = Math.min(parseInt(cntM?.[1] || '1'), 3);
-        const situations = ['confident and bold', 'shocked expression', 'laughing hysterically'];
-        for (let si = 0; si < cnt; si++) {
-          const p2 = cnt > 1 ? baseP + ', character is ' + situations[si % situations.length] : baseP;
-          const u2 = await generateImage(p2.slice(0, 500));
-          if (u2.startsWith('http')) preGeneratedUrls.push(u2);
-          if (si < cnt - 1) await new Promise(r => setTimeout(r, 800));
-        }
-        console.log('[pre-gen] Generated', preGeneratedUrls.length, 'images before AI call');
-      } catch (pgErr) { console.error('[pre-gen]', pgErr); }
-    }
     // Tool awareness - server handles execution, agent just needs to know what it can do
     const toolCapabilities: Record<string, string> = {
       web_search: 'search the web for current information on any topic',
@@ -1897,7 +1859,7 @@ async function startServer() {
         const b64 = imageData.replace(/^data:image\/[^;]+;base64,/, '');
         const mime = (imageData.match(/^data:(image\/[^;]+);/) || [])[1] || 'image/jpeg';
         const txt = (message || 'Describe this image in detail.').replace(/\[[^\]]*\]/g, '').trim() || 'Describe this image in detail.';
-        const visSys = finalSystemPrompt + '\n\nSTRICT: 2-3 sentences max. No bullet points. No dashes. No markdown. Never write tool call syntax. Speak like a creative person texting.';
+        const visSys = finalSystemPrompt + '\n\nSTRICT: 2-3 sentences max. No bullet points. No dashes. No markdown. Speak like a creative person texting.';
         // Only include prior messages (not current), clean and short
         const priorMsgs = history.slice(0, -1)
           .map((m: any) => ({ role: m.role as any, content: String(m.content || '').replace(/\[[^\]]*\]/g,'').trim().slice(0,1500) }))
@@ -1926,11 +1888,11 @@ async function startServer() {
           save();
         }
       } catch (visionErr: any) {
-        const errMsg = visionErr?.message || visionErr?.error?.message || JSON.stringify(visionErr);
-        console.error('[vision-err] FULL ERROR:', errMsg, 'status:', visionErr?.status, 'type:', visionErr?.type);
-        // Return actual error so user knows what happened
-        rawContent = 'Vision processing failed: ' + errMsg.slice(0, 200) + '. Try: 1) Make sure Claude Sonnet is selected (not Haiku), 2) The image must be JPEG/PNG under 5MB, 3) Check ANTHROPIC_API_KEY is set in Railway.';
-        tokensUsed = 0;
+        console.error('[vision-err]', visionErr?.message, visionErr?.status);
+        // Fall back to text-only with image context hint
+        const fallback = await callAI(activeProvider, effectiveModel, finalSystemPrompt + '\n\nNote: User uploaded an image but vision processing failed. Ask them to describe what they want made.', history, plan.maxTokens);
+        rawContent = fallback.text;
+        tokensUsed = fallback.tokensUsed;
       }
     } else {
       const aiRes = await callAI(activeProvider, effectiveModel, finalSystemPrompt, history, plan.maxTokens);
@@ -1940,86 +1902,18 @@ async function startServer() {
 
     // Parse and execute any tool calls in the response
     let content = rawContent;
-    // Intercept when Claude outputs tool call syntax directly (e.g. createtelegramsticker("..."))
-    const inlineMatch = rawContent.match(/(?:createtelegramsticker|generate_image)\s*\(['"]*([^'")(]+)['"]*\)/i);
-    if (inlineMatch && canGenerateImages) {
-      try {
-        const inlinePrompt = inlineMatch[1] || message.slice(0, 300);
-        const iUrl = await generateImage(inlinePrompt.slice(0, 500));
-        if (iUrl.startsWith('http')) {
-          content = rawContent.replace(inlineMatch[0], '').trim() + '\n\n' + iUrl;
-        }
-      } catch(ie) { console.error('[inline-tool]', ie); }
-    }
 
     // Keyword intent detection - auto-fire tools based on message keywords
     const msgL = message.toLowerCase();
-    // Detect sticker/image generation requests - fire DALL-E immediately  
-    // Allow image gen if tools explicitly include it OR if agent is a creative template
-    const canGenerateImages = agentTools.includes('generate_image') || 
-      ['creative-director','content-creator'].includes((agent as any).template_id || '');
-    const wantsImageGen = canGenerateImages && (
-      // Explicit creation requests
-      ((msgL.includes('generat') || msgL.includes('creat') || msgL.includes('draw') || msgL.includes('make') || msgL.includes('design') || msgL.includes('build')) &&
-       (msgL.includes('image') || msgL.includes('sticker') || msgL.includes('meme') || msgL.includes('picture') || msgL.includes('logo') || msgL.includes('illustration') || msgL.includes('gif') || msgL.includes('pack'))) ||
-      // Sticker pack requests
-      (msgL.includes('sticker') && (msgL.includes('pack') || msgL.includes('telegram') || msgL.includes('make') || msgL.includes('create') || msgL.includes('generate'))) ||
-      // "show me" / "let me see" requests
-      (msgL.includes('show') && (msgL.includes('sticker') || msgL.includes('meme') || msgL.includes('image')))
-    );
-    if (wantsImageGen) {
+    if (agentTools.includes('generate_image') && !imageData &&
+        (msgL.includes('generat') || msgL.includes('creat') || msgL.includes('draw') || msgL.includes('make') || msgL.includes('design')) &&
+        (msgL.includes('image') || msgL.includes('sticker') || msgL.includes('meme') || msgL.includes('picture') || msgL.includes('logo') || msgL.includes('illustration'))) {
       try {
-        // Build a good prompt from the request + any image context
-        const convCtxRec = db.data.conversations.find((c: any) => c.id === convId);
-        const imgCtx = (convCtxRec as any)?.image_context?.slice(-1)?.[0] || '';
-        // Build prompt from: image context + Claude's own description of what to make
-        const claudeDesc = rawContent.slice(0, 300); // Claude described what it wants to make
-        const basePrompt = imgCtx 
-          ? `Telegram sticker, cartoon style, white background, bold outlines. Character: ${imgCtx.slice(0, 150)}. ${claudeDesc.slice(0, 100)}`
-          : `${claudeDesc.slice(0, 200)} telegram sticker style, white background, bold cartoon outlines, expressive`;
-        
-        // Check if requesting a pack (multiple stickers)
-        const wantsPack = msgL.includes('pack') || (msgL.includes('sticker') && /\d+/.test(msgL));
-        const countMatch = message.match(/(\d+)\s*(sticker|image)/i);
-        const count = wantsPack ? Math.min(parseInt(countMatch?.[1] || '3'), 4) : 1;
-        
-        const generatedUrls: string[] = [];
-        const situations = wantsPack ? [
-          'looking shocked with wide eyes',
-          'flexing muscles confidently', 
-          'laughing hysterically',
-          'crying dramatically',
-          'giving thumbs up'
-        ] : [''];
-        
-        for (let si = 0; si < count; si++) {
-          const prompt = wantsPack 
-            ? `${basePrompt}, character is ${situations[si]}, telegram sticker style, white background, bold outlines`
-            : basePrompt;
-          const url = await generateImage(prompt.slice(0, 500));
-          if (url.startsWith('http')) generatedUrls.push(url);
-          if (si < count - 1) await new Promise(r => setTimeout(r, 500)); // rate limit
-        }
-        
-        if (generatedUrls.length > 0) {
-          const imageSection = generatedUrls.length > 1
-            ? generatedUrls.map((url, i) => `🎭 Sticker ${i+1}:\n${url}`).join('\n\n')
-            : generatedUrls[0];
-          // Clean the text response and append images
-          const cleanText = rawContent
-            .replace(/give me a sec[^.!]*/gi, '')
-            .replace(/give me a moment[^.!]*/gi, '')
-            .replace(/i'll (cook|whip|generate|create)[^.!]*/gi, '')
-            .replace(/cooking up[^.!]*/gi, '')
-            .trim();
-          content = (cleanText || 'Here are your stickers:') + '\n\n' + imageSection;
-        } else {
-          // Generation failed silently - tell user
-          content = rawContent + '\n\n(Image generation failed - try asking again or check OPENAI_API_KEY in Railway settings)';
-        }
+        const genUrl = await generateImage(message.slice(0, 400));
+        if (genUrl.startsWith('http')) content = rawContent + '\n\n' + genUrl;
       } catch (e) { console.error('[intent-img]', e); }
     }
-    if ((agentTools.includes('web_search') || ['research-agent','personal-assistant','crypto-advisor','builder-assistant'].includes((agent as any).template_id || '')) && !imageData &&
+    if (agentTools.includes('web_search') && !imageData &&
         (msgL.includes('search') || msgL.includes('look up') || msgL.includes('find') || msgL.includes('research') || msgL.includes('latest') || msgL.includes('current') || msgL.includes('today'))) {
       try {
         const sr = await webSearch(message, 4);
@@ -2139,19 +2033,14 @@ async function startServer() {
     } catch (e: any) {
       console.error('[chat error]', e?.message, e?.status, e?.error);
       logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'error', channel: 'web', summary: 'Error during web chat', status: 'error', error_message: e?.message });
-      const rawErr = e?.message || String(e);
+      // Return friendly error messages instead of raw API errors
       let friendlyError = 'Something went wrong. Please try again.';
-      if (e?.status === 401 || rawErr.includes('401') || rawErr.includes('auth')) {
-        friendlyError = 'API key error — check ANTHROPIC_API_KEY or OPENAI_API_KEY in Railway.';
-      } else if (e?.status === 429 || rawErr.includes('429') || rawErr.includes('rate')) {
-        friendlyError = 'Rate limit — try again in 30 seconds or switch to a different model.';
-      } else if (rawErr.includes('overload') || rawErr.includes('529')) {
-        friendlyError = 'Service overloaded — switch to GPT-4o or try again shortly.';
-      } else {
-        friendlyError = rawErr.slice(0, 150);
-      }
-      console.error('[chat-err]', rawErr.slice(0, 200));
-      res.status(500).json({ error: friendlyError });
+      if (e?.message?.includes('authentication') || e?.message?.includes('401') || e?.status === 401) {
+        friendlyError = 'API key issue. The AI service needs to be configured. If you are the owner, check your API keys in Railway environment variables.';
+      } else if (e?.message?.includes('rate') || e?.status === 429) {
+        friendlyError = 'Rate limit hit. Give it a moment and try again.';
+      } else if (e?.message?.includes('model') || e?.message?.includes('not found')) {
+        friendlyError = 'This AI model is not available. Try switching to a different model in settings.';
       }
       res.status(500).json({ error: friendlyError });
     }
@@ -5635,50 +5524,6 @@ async function telegramStickerTool(
     res.json({ ok: true });
   });
 
-
-  // Test vision capability
-  app.post('/api/test-vision', auth, async (req: any, res: any) => {
-    const { imageData } = req.body;
-    if (!imageData) return res.status(400).json({ error: 'imageData required' });
-    try {
-      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
-      const b64 = imageData.replace(/^data:image\/[^;]+;base64,/, '');
-      const mime = (imageData.match(/^data:(image\/[^;]+);/) || [])[1] || 'image/jpeg';
-      const resp = await client.messages.create({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 200,
-        messages: [{ role: 'user', content: [
-          { type: 'image', source: { type: 'base64', media_type: mime as any, data: b64 } },
-          { type: 'text', text: 'What do you see in this image? Be brief.' }
-        ]}]
-      });
-      res.json({ ok: true, response: (resp.content[0] as any).text });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message, type: e.type, status: e.status, full: JSON.stringify(e) });
-    }
-  });
-
-
-  // Auto-fix agent tools based on template
-  app.post('/api/admin/fix-agent-tools', auth, (req: any, res: any) => {
-    if (req.user.email !== ADMIN_EMAIL && req.user.plan !== 'admin') return res.status(403).json({ error: 'Admin only' });
-    const TM: Record<string, string[]> = {
-      'creative-director': ['generate_image', 'web_search', 'create_telegram_sticker', 'search_knowledge_base'],
-      'content-creator': ['generate_image', 'web_search', 'send_email'],
-      'research-agent': ['web_search', 'search_knowledge_base', 'calculate'],
-      'personal-assistant': ['web_search', 'send_email', 'search_knowledge_base', 'get_time'],
-      'sales-outreach': ['send_email', 'create_lead', 'web_search'],
-      'community-manager': ['web_search', 'send_notification', 'create_lead', 'webhook'],
-      'buy-bot': ['send_notification', 'webhook', 'web_search'],
-    };
-    let n = 0;
-    db.data.agents.filter((a: any) => a.user_id === req.userId).forEach((a: any) => {
-      const t = TM[a.template_id || ''] || ['web_search', 'generate_image'];
-      if (JSON.stringify(a.tools_enabled || []) !== JSON.stringify(t)) { a.tools_enabled = t; n++; }
-    });
-    if (n > 0) save();
-    res.json({ fixed: n });
-  });
   // ─── Platform Guide AI ────────────────────────────────────────────────────
   app.post('/api/platform-guide', async (req: any, res: any) => {
     const { messages } = req.body;
