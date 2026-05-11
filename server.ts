@@ -2139,14 +2139,19 @@ async function startServer() {
     } catch (e: any) {
       console.error('[chat error]', e?.message, e?.status, e?.error);
       logActivity({ user_id: req.userId, agent_id: agent.id, agent_name: agent.name, event_type: 'error', channel: 'web', summary: 'Error during web chat', status: 'error', error_message: e?.message });
-      // Return friendly error messages instead of raw API errors
+      const rawErr = e?.message || String(e);
       let friendlyError = 'Something went wrong. Please try again.';
-      if (e?.message?.includes('authentication') || e?.message?.includes('401') || e?.status === 401) {
-        friendlyError = 'API key issue. The AI service needs to be configured. If you are the owner, check your API keys in Railway environment variables.';
-      } else if (e?.message?.includes('rate') || e?.status === 429) {
-        friendlyError = 'Rate limit hit. Give it a moment and try again.';
-      } else if (e?.message?.includes('model') || e?.message?.includes('not found')) {
-        friendlyError = 'This AI model is not available. Try switching to a different model in settings.';
+      if (e?.status === 401 || rawErr.includes('401') || rawErr.includes('auth')) {
+        friendlyError = 'API key error — check ANTHROPIC_API_KEY or OPENAI_API_KEY in Railway.';
+      } else if (e?.status === 429 || rawErr.includes('429') || rawErr.includes('rate')) {
+        friendlyError = 'Rate limit — try again in 30 seconds or switch to a different model.';
+      } else if (rawErr.includes('overload') || rawErr.includes('529')) {
+        friendlyError = 'Service overloaded — switch to GPT-4o or try again shortly.';
+      } else {
+        friendlyError = rawErr.slice(0, 150);
+      }
+      console.error('[chat-err]', rawErr.slice(0, 200));
+      res.status(500).json({ error: friendlyError });
       }
       res.status(500).json({ error: friendlyError });
     }
