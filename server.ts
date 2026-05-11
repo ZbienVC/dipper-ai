@@ -1888,11 +1888,11 @@ async function startServer() {
           save();
         }
       } catch (visionErr: any) {
-        console.error('[vision-err]', visionErr?.message, visionErr?.status);
-        // Fall back to text-only with image context hint
-        const fallback = await callAI(activeProvider, effectiveModel, finalSystemPrompt + '\n\nNote: User uploaded an image but vision processing failed. Ask them to describe what they want made.', history, plan.maxTokens);
-        rawContent = fallback.text;
-        tokensUsed = fallback.tokensUsed;
+        const errMsg = visionErr?.message || visionErr?.error?.message || JSON.stringify(visionErr);
+        console.error('[vision-err] FULL ERROR:', errMsg, 'status:', visionErr?.status, 'type:', visionErr?.type);
+        // Return actual error so user knows what happened
+        rawContent = 'Vision processing failed: ' + errMsg.slice(0, 200) + '. Try: 1) Make sure Claude Sonnet is selected (not Haiku), 2) The image must be JPEG/PNG under 5MB, 3) Check ANTHROPIC_API_KEY is set in Railway.';
+        tokensUsed = 0;
       }
     } else {
       const aiRes = await callAI(activeProvider, effectiveModel, finalSystemPrompt, history, plan.maxTokens);
@@ -5522,6 +5522,29 @@ async function telegramStickerTool(
     (req.user as any).email_from_label = label;
     save();
     res.json({ ok: true });
+  });
+
+
+  // Test vision capability
+  app.post('/api/test-vision', auth, async (req: any, res: any) => {
+    const { imageData } = req.body;
+    if (!imageData) return res.status(400).json({ error: 'imageData required' });
+    try {
+      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+      const b64 = imageData.replace(/^data:image\/[^;]+;base64,/, '');
+      const mime = (imageData.match(/^data:(image\/[^;]+);/) || [])[1] || 'image/jpeg';
+      const resp = await client.messages.create({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 200,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: mime as any, data: b64 } },
+          { type: 'text', text: 'What do you see in this image? Be brief.' }
+        ]}]
+      });
+      res.json({ ok: true, response: (resp.content[0] as any).text });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message, type: e.type, status: e.status, full: JSON.stringify(e) });
+    }
   });
 
   // ─── Platform Guide AI ────────────────────────────────────────────────────
