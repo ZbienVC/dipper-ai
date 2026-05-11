@@ -613,16 +613,13 @@ export default function AgentDetail() {
       <div className="px-3 py-2 border-t border-[#1e1e2e] bg-[#111118]">
         <input ref={fileInputRef} type="file" className="hidden" accept="image/*,video/*,.gif"
           onChange={e => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
-        {uploadedFile && (
-          <div className="mb-2 p-2 rounded-xl flex items-center gap-3 border border-violet-500/25 bg-violet-500/8">
-            {uploadedFile.type.startsWith('image/') && (
-              <img src={uploadedFile.url} alt="" className="w-12 h-12 object-cover rounded-lg border border-violet-500/30 flex-shrink-0" />
-            )}
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-violet-300">Image ready for analysis</div>
-              <div className="text-xs text-slate-500 truncate">{uploadedFile.name}</div>
-            </div>
-            <button onClick={() => setUploadedFile(null)} className="text-slate-500 hover:text-red-400 transition-colors"><X size={12} /></button>
+        {uploadedFile && uploadedFile.type.startsWith('image/') && (
+          <div className="mb-2 relative inline-block self-end" style={{ maxWidth: 180 }}>
+            <img src={uploadedFile.url} alt="" className="rounded-2xl object-cover border border-violet-500/30" style={{ maxWidth: 180, maxHeight: 140 }} />
+            <button onClick={() => setUploadedFile(null)}
+              className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 flex items-center justify-center text-white hover:bg-black/80 transition-colors">
+              <X size={10} />
+            </button>
           </div>
         )}
         <div className="flex gap-2 items-center">
