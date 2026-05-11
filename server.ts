@@ -18,6 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const JWT_SECRET = process.env.JWT_SECRET || 'dipperai-dev-secret';
 const PORT = parseInt(process.env.PORT || '3001');
 
+// v2.1.0 - vision, image gen, memory, community hub
 // ─── Database ──────────────────────────────────────────────────────────────────
 type User = {
   id: string; email: string; username: string; password_hash: string;
