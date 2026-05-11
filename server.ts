@@ -1777,16 +1777,34 @@ async function startServer() {
       db.data.conversations.push({ id: convId, agent_id: agent.id, user_id: req.userId, channel: 'web', message_count: 0, created_at: new Date().toISOString() });
     }
 
-    // Build history - extract image descriptions from previous messages for context
+    // Build history
     const rawHistory = db.data.messages.filter(m => m.conversation_id === convId);
-    const imageDescriptions = rawHistory
-      .filter(m => m.content.includes('[IMAGE ANALYZED:'))
-      .map(m => { const match = m.content.match(/\[IMAGE ANALYZED: ([^\]]*)/); return (match?.[1] || '').slice(0, 500); })
-      .filter(Boolean);
-    const history = rawHistory.map(m => ({ role: m.role, content: m.content }));
-    // Add image context to system prompt if there are previous image analyses
-    const imageCtxAddition = imageDescriptions.length > 0 && !imageData
-      ? `\n\nCRITICAL IMAGE CONTEXT: The user previously shared an image which you analyzed in this conversation. You MUST use this context. Do NOT say you cannot see an image or ask them to upload one again.\n\nImage description from earlier in this conversation: "${imageDescriptions[imageDescriptions.length - 1]}"\n\nWhen the user refers to "this image", "this character", "this meme", "this", or makes any reference to previously shared visual content, use the above description to fulfill their request.`
+    const history = rawHistory.map(m => ({
+      role: m.role,
+      // Clean annotations from messages sent to AI
+      content: m.content
+        .replace(/\[IMAGE ANALYZED:[^\]]*\]/g, '')
+        .replace(/\[IMAGE:[^\]]*\]/g, '')
+        .replace(/\[The user has uploaded[^\]]*\]/g, '')
+        .replace(/\[User attached:[^\]]*\]/g, '')
+        .trim() || m.content,
+    }));
+    
+    // Get image context from conversation record (most reliable)
+    const convRecord = db.data.conversations.find((c: any) => c.id === convId);
+    const storedImages: string[] = (convRecord as any)?.image_context || [];
+    // Also scan message history as fallback
+    const msgImageDescs = rawHistory
+      .filter(m => m.content.includes('[IMAGE:') || m.content.includes('[IMAGE ANALYZED:'))
+      .map(m => {
+        const m1 = m.content.match(/\[IMAGE: ([^\]]*)/);
+        const m2 = m.content.match(/\[IMAGE ANALYZED: ([^\]]*)/);
+        return ((m1?.[1] || m2?.[1]) || '').slice(0, 600);
+      }).filter(Boolean);
+    
+    const allImageDescs = [...new Set([...storedImages, ...msgImageDescs])];
+    const imageCtxAddition = allImageDescs.length > 0 && !imageData
+      ? `\n\nCRITICAL MEMORY - DO NOT IGNORE: Earlier in this conversation the user shared an image you analyzed. Here is what you saw:\n"${allImageDescs[allImageDescs.length - 1]}"\n\nYou MUST use this description when the user says "this image", "this meme", "this character", "the image", or anything referring to visual content. Do NOT say you cannot see an image. Do NOT ask them to re-upload. You already analyzed it - act on what you saw.`
       : '';
     // Include image context if provided
     const imageName = (req.body as any).imageName || 'image';
@@ -2986,11 +3004,21 @@ async function startServer() {
         aiResult = await callAI(activeProvider, effectiveModel, finalSystemPrompt + '\n\nSTRICT: 1-3 sentences max. No lists, dashes, bullets, headers or bold. Direct and conversational.', history, plan.maxTokens);
       }
       const { text: content, tokensUsed } = aiResult;
-      // Store user message with image description for conversation memory
-      // Use the vision response (content/rawContent) as the image description
-      const imageDesc = imageData && rawContent ? rawContent.slice(0, 400) : '';
+      // Store image description on conversation record for persistent memory
+      const imageDesc = imageData && rawContent ? rawContent.slice(0, 600) : '';
+      if (imageDesc) {
+        const convRecord = db.data.conversations.find((c: any) => c.id === convId);
+        if (convRecord) {
+          if (!(convRecord as any).image_context) (convRecord as any).image_context = [];
+          (convRecord as any).image_context.push(imageDesc);
+          // Keep only last 3 images
+          if ((convRecord as any).image_context.length > 3) {
+            (convRecord as any).image_context = (convRecord as any).image_context.slice(-3);
+          }
+        }
+      }
       const userMsgContent = imageDesc
-        ? message + ' [IMAGE ANALYZED: ' + imageDesc + ']'
+        ? message + ' [IMAGE: ' + imageDesc.slice(0, 200) + ']'
         : message;
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'user', content: userMsgContent, created_at: new Date().toISOString() });
       db.data.messages.push({ id: randomUUID(), conversation_id: convId, role: 'assistant', content, model_used: agent.model, created_at: new Date().toISOString() });
