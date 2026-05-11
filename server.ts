@@ -1853,6 +1853,49 @@ async function startServer() {
     let tokensUsed: number;
     console.log('[auth-chat] imageData present:', !!imageData, 'length:', imageData?.length || 0, 'provider:', activeProvider, 'model:', effectiveModel);
     if (imageData && activeProvider === 'anthropic') {
+      // Vision API - analyze image with Claude
+      try {
+        const anthropicVis = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+        const b64 = imageData.replace(/^data:image\/[^;]+;base64,/, '');
+        const mime = (imageData.match(/^data:(image\/[^;]+);/) || [])[1] || 'image/jpeg';
+        const txt = (message || 'Describe this image in detail.').replace(/\[[^\]]*\]/g, '').trim() || 'Describe this image in detail.';
+        const visSys = finalSystemPrompt + '\n\nSTRICT: 2-3 sentences max. No bullet points. No dashes. No markdown. Speak like a creative person texting.';
+        // Only include prior messages (not current), clean and short
+        const priorMsgs = history.slice(0, -1)
+          .map((m: any) => ({ role: m.role as any, content: String(m.content || '').replace(/\[[^\]]*\]/g,'').trim().slice(0,1500) }))
+          .filter((m: any) => m.content.length > 2);
+        const vr = await anthropicVis.messages.create({
+          model: effectiveModel.includes('haiku') ? 'claude-sonnet-4-5' : effectiveModel,
+          max_tokens: 500,
+          system: visSys,
+          messages: [
+            ...priorMsgs,
+            { role: 'user', content: [
+              { type: 'image', source: { type: 'base64', media_type: mime as any, data: b64 } },
+              { type: 'text', text: txt }
+            ]}
+          ]
+        });
+        rawContent = (vr.content[0] as any).text || '';
+        tokensUsed = (vr.usage?.input_tokens || 0) + (vr.usage?.output_tokens || 0);
+        console.log('[vision-ok] len:', rawContent.length);
+        // Store image description on conversation for memory
+        const convRec = db.data.conversations.find((c: any) => c.id === convId);
+        if (convRec && rawContent) {
+          if (!(convRec as any).image_context) (convRec as any).image_context = [];
+          (convRec as any).image_context.push(rawContent.slice(0, 500));
+          if ((convRec as any).image_context.length > 5) (convRec as any).image_context = (convRec as any).image_context.slice(-5);
+          save();
+        }
+      } catch (visionErr: any) {
+        console.error('[vision-err]', visionErr?.message, visionErr?.status);
+        // Fall back to text-only with image context hint
+        const fallback = await callAI(activeProvider, effectiveModel, finalSystemPrompt + '\n\nNote: User uploaded an image but vision processing failed. Ask them to describe what they want made.', history, plan.maxTokens);
+        rawContent = fallback.text;
+        tokensUsed = fallback.tokensUsed;
+      }
+    } else {
+    if (imageData && activeProvider === 'anthropic') {
       console.log('[auth-chat] USING VISION API - imageData length:', imageData.length);
       const anthropicVisionClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       if (!process.env.ANTHROPIC_API_KEY) { throw new Error('ANTHROPIC_API_KEY not set in environment'); }
