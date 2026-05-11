@@ -512,6 +512,9 @@ function cleanAgentResponse(text: string): string {
     .replace(/createtelegramsticker\s*\([^)]*\)/gi, '')
     .replace(/generate_image\s*\([^)]*\)/gi, '')
     .replace(/TOOL:[a-z_]+\s*\([^)]*\)/gi, '')
+    .replace(/createtelegramsticker\s*\([^)]*\)/gi, '')
+    .replace(/generate_image\s*\([^)]*\)/gi, '')
+    .replace(/TOOL:[a-z_]+\s*\([^)]*\)/gi, '')
     // Strip XML/function_call leakage
     .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '')
     .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
