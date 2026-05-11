@@ -495,114 +495,108 @@ export default function AgentDetail() {
     </div>
   )
 
-  const renderChat = () => {
-    const agentCategory = agent?.template_id || 'custom'
-    const sampleInputs: Record<string, string[]> = {
-      'customer-support': ['What are your business hours?', 'I need to return my order', 'My item arrived damaged', 'How long does shipping take?', 'Can you help me track my package?'],
-      'lead-gen': ['Tell me more about your services', 'How much does it cost?', 'Can I schedule a demo?', 'What makes you different from competitors?', 'Do you offer a free trial?'],
-      'sales': ['What plans do you offer?', 'Is there a discount for annual billing?', 'Can I see a case study?', "What's your refund policy?", 'How do I get started?'],
-      'community': ['How do I get verified?', "What are the community rules?", 'Who do I contact for help?', 'How do I share my work here?', 'Where do I introduce myself?'],
-      'custom': ['What can you help me with?', 'Tell me about yourself', 'How does this work?', 'What are your main features?', 'Give me an example of what you can do'],
-    }
-    const samples = sampleInputs[agentCategory] || sampleInputs['custom']
-
-    return (
-    <div className="space-y-3">
-      {memoriesTotal > 0 && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-violet-500/10 border border-violet-500/20 rounded-xl text-sm text-violet-300">
-          <span>💾</span>
-          <span>Memory active — this agent remembers past interactions</span>
+  const renderChat = () => (
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 180px)', minHeight: 520 }}>
+      {/* Header - clean, minimal */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-[#1e1e2e] bg-[#111118] shrink-0">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-violet-800 flex items-center justify-center text-base shrink-0">
+          {agent?.emoji || '🤖'}
         </div>
-      )}
-
-      {/* Sample test messages */}
-      <div className="bg-[#111118] border border-[#1e1e2e] rounded-xl p-4">
-        <p className="text-xs font-semibold text-slate-400 mb-2">🧪 Test with sample inputs</p>
-        <div className="flex flex-wrap gap-2">
-          {samples.map((sample, i) => (
-            <button
-              key={i}
-              onClick={() => { setInputText(sample) }}
-              className="px-3 py-1.5 rounded-lg text-xs border border-[#1e1e2e] text-slate-400 hover:border-violet-500/40 hover:text-violet-300 hover:bg-violet-500/5 transition-all"
-            >
-              {sample}
-            </button>
-          ))}
-        </div>
-      </div>
-
-    <div className="flex flex-col h-[580px] bg-[#111118] border border-[#1e1e2e] rounded-xl overflow-hidden">
-      <div className="px-4 py-3 border-b border-[#1e1e2e] flex items-center gap-3 min-w-0">
-        <div className="w-8 h-8 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-sm">
-          {agent?.emoji || <Bot size={14} className="text-violet-400" />}
-        </div>
-        <div className="flex-1 min-w-0 overflow-hidden">
-          <p className="font-semibold text-white text-sm">{agent?.name}</p>
-          <p className="text-xs text-green-400 font-medium flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" /> Online
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-white text-sm leading-tight">{agent?.name}</p>
+          <p className="text-[11px] text-green-400 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block animate-pulse" /> Online
           </p>
         </div>
-        <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
-          className="w-auto px-2 py-1 rounded-lg bg-[#0d0d15] border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/40 text-white text-xs shrink-0" style={{ maxWidth: 155 }}>
-          <optgroup label="── Anthropic Claude ──">
-            <option value="claude-sonnet-4-5">Sonnet 3.5 👁 — Best default. Balanced speed, quality &amp; vision.</option>
-            <option value="claude-haiku-4-5">Haiku 3 ⚡ — Fastest &amp; cheapest. High-volume text bots only.</option>
-            <option value="claude-opus-4-5">Opus 👁 — Deepest reasoning. Complex research &amp; long docs.</option>
-          </optgroup>
-          <optgroup label="── OpenAI GPT ──">
-            <option value="gpt-4o">GPT-4o 👁 — Best for code, data &amp; structured output. Vision.</option>
-            <option value="gpt-4o-mini">GPT-4o Mini — Affordable OpenAI. Good writing, no vision.</option>
-          </optgroup>
-          <optgroup label="── Google Gemini ──">
-            <option value="gemini-1.5-flash">Gemini Flash — Huge context window. Long documents.</option>
-          </optgroup>
-        </select>
-        <p className="text-xs text-slate-500 mt-1.5">👁 = can see and analyze images &nbsp;|&nbsp; Models without 👁 are text-only</p>
-        <button
-          onClick={() => { const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); setMessages([{ role: 'agent', text: 'Conversation cleared. How can I help you?', ts: t }]); }}
-          className="p-1.5 rounded-lg border border-[#1e1e2e] text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
-          title="Clear conversation"
-        >
-          <Trash2 size={13} />
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
+            className="px-2 py-1 rounded-lg bg-[#0d0d15] border border-[#1e1e2e] text-white text-xs focus:outline-none focus:ring-1 focus:ring-violet-500/40 shrink-0"
+            style={{ maxWidth: 140 }}
+            title="Select AI model — models with 👁 can analyze images">
+            <optgroup label="Anthropic Claude">
+              <option value="claude-sonnet-4-5">Sonnet 3.5 👁</option>
+              <option value="claude-haiku-4-5">Haiku 3 ⚡</option>
+              <option value="claude-opus-4-5">Opus 👁</option>
+            </optgroup>
+            <optgroup label="OpenAI GPT">
+              <option value="gpt-4o">GPT-4o 👁</option>
+              <option value="gpt-4o-mini">GPT-4o Mini</option>
+            </optgroup>
+            <optgroup label="Google">
+              <option value="gemini-1.5-flash">Gemini Flash</option>
+            </optgroup>
+          </select>
+          <button
+            onClick={() => { const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); setMessages([{ role: 'agent', text: 'Conversation cleared. How can I help you?', ts: t }]); }}
+            className="w-7 h-7 rounded-lg border border-[#1e1e2e] text-slate-600 hover:text-red-400 hover:bg-red-500/8 hover:border-red-500/20 transition-all flex items-center justify-center"
+            title="Clear conversation">
+            <Trash2 size={12} />
+          </button>
+        </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#0a0a0f]">
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-[#0a0a0f]" style={{ scrollbarWidth: 'thin' }}>
+        {memoriesTotal > 0 && (
+          <div className="flex items-center justify-center">
+            <span className="text-[11px] text-violet-400/60 bg-violet-500/8 border border-violet-500/15 rounded-full px-3 py-1">
+              💾 Memory active — agent remembers past interactions
+            </span>
+          </div>
+        )}
+
         {messages.map((msg, i) => (
-          <div key={i} className={`flex items-end gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div key={i} className={`flex items-end gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             {msg.role === 'agent' && (
-              <div className="w-7 h-7 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0 mb-1 text-sm">
+              <div className="w-7 h-7 rounded-lg bg-violet-600/20 border border-violet-500/20 flex items-center justify-center flex-shrink-0 mb-0.5 text-sm">
                 {agent?.emoji || <Bot size={12} className="text-violet-400" />}
               </div>
             )}
-            <div className={`max-w-[80%] flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              {msg.imageUrl && msg.role === 'user' && (
-                <img src={msg.imageUrl} alt="attached"
-                  className="rounded-xl max-w-[200px] max-h-[160px] object-cover border border-violet-500/30 mb-1 self-end"
+            <div className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end max-w-[75%]' : 'items-start max-w-[80%]'}`}>
+              {/* Image bubble — shows above text if image was attached */}
+              {msg.imageUrl && (
+                <img
+                  src={msg.imageUrl}
+                  alt="Attached image"
+                  className="rounded-2xl object-cover block"
+                  style={{
+                    maxWidth: 240,
+                    maxHeight: 200,
+                    borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                    border: '1px solid rgba(139,92,246,0.2)',
+                  }}
                 />
               )}
-              <div className={`px-4 py-2.5 rounded-xl text-sm leading-relaxed ${
-                msg.role === 'user' ? 'text-white rounded-br-sm bg-violet-600' : 'bg-[#16161f] text-slate-200 border border-[#1e1e2e] rounded-bl-sm'
-              }`}>
-                <MsgText text={msg.text} />
-              </div>
-              <span className="text-xs text-slate-600 px-1">{msg.ts}</span>
+              {/* Text bubble */}
+              {msg.text && (
+                <div className={`px-3.5 py-2.5 text-sm leading-relaxed ${
+                  msg.role === 'user'
+                    ? 'text-white bg-violet-600 rounded-[18px] rounded-br-[4px]'
+                    : 'text-slate-200 bg-[#16161f] border border-[#1e1e2e] rounded-[18px] rounded-bl-[4px]'
+                }`}>
+                  <MsgText text={msg.text} />
+                </div>
+              )}
+              <span className="text-[10px] text-slate-700 px-1">{msg.ts}</span>
             </div>
             {msg.role === 'user' && (
-              <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0 mb-1">
-                <User size={12} className="text-slate-400" />
+              <div className="w-7 h-7 rounded-lg bg-white/8 flex items-center justify-center flex-shrink-0 mb-0.5">
+                <User size={11} className="text-slate-500" />
               </div>
             )}
           </div>
         ))}
+
+        {/* Typing indicator */}
         {thinking && (
-          <div className="flex items-end gap-2 justify-start">
-            <div className="w-7 h-7 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0">
+          <div className="flex items-end gap-2.5 justify-start">
+            <div className="w-7 h-7 rounded-lg bg-violet-600/20 border border-violet-500/20 flex items-center justify-center flex-shrink-0">
               <Bot size={12} className="text-violet-400" />
             </div>
-            <div className="bg-[#16161f] border border-[#1e1e2e] rounded-xl rounded-bl-sm px-4 py-2.5">
-              <div className="flex gap-1 items-center">
+            <div className="bg-[#16161f] border border-[#1e1e2e] rounded-[18px] rounded-bl-[4px] px-4 py-3">
+              <div className="flex gap-1.5 items-center">
                 {[0, 150, 300].map(d => (
-                  <span key={d} className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce" style={{ animationDelay: `${d}ms` }} />
+                  <span key={d} className="w-1.5 h-1.5 rounded-full bg-violet-400/60 animate-bounce" style={{ animationDelay: `${d}ms` }} />
                 ))}
               </div>
             </div>
@@ -610,42 +604,62 @@ export default function AgentDetail() {
         )}
         <div ref={chatEndRef} />
       </div>
-      <div className="px-3 py-2 border-t border-[#1e1e2e] bg-[#111118]">
-        <input ref={fileInputRef} type="file" className="hidden" accept="image/*,video/*,.gif"
+
+      {/* Input area */}
+      <div className="px-4 py-3 border-t border-[#1e1e2e] bg-[#111118] shrink-0">
+        <input ref={fileInputRef} type="file" className="hidden" accept="image/*,video/*,.gif,.pdf,.txt"
           onChange={e => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
+
+        {/* Image preview */}
         {uploadedFile && uploadedFile.type.startsWith('image/') && (
-          <div className="mb-2 relative inline-block self-end" style={{ maxWidth: 180 }}>
-            <img src={uploadedFile.url} alt="" className="rounded-2xl object-cover border border-violet-500/30" style={{ maxWidth: 180, maxHeight: 140 }} />
-            <button onClick={() => setUploadedFile(null)}
-              className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 flex items-center justify-center text-white hover:bg-black/80 transition-colors">
-              <X size={10} />
-            </button>
+          <div className="mb-2.5 flex justify-end">
+            <div className="relative inline-block">
+              <img src={uploadedFile.url} alt="" className="rounded-2xl object-cover block"
+                style={{ maxWidth: 160, maxHeight: 120, borderRadius: 14, border: '1px solid rgba(139,92,246,0.3)' }} />
+              <button onClick={() => setUploadedFile(null)}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#0a0a0f] border border-[#1e1e2e] flex items-center justify-center text-slate-400 hover:text-red-400 transition-colors">
+                <X size={9} />
+              </button>
+            </div>
           </div>
         )}
-        <div className="flex gap-2 items-center">
+
+        {/* Input row */}
+        <div className="flex items-end gap-2">
           <button onClick={() => fileInputRef.current?.click()}
-            className="w-8 h-8 rounded-xl flex items-center justify-center bg-white/4 border border-white/8 text-slate-400 hover:text-violet-400 hover:border-violet-500/30 transition-all flex-shrink-0"
-            title="Attach image">
-            <Paperclip size={13} />
+            className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#0d0d15] border border-[#1e1e2e] text-slate-500 hover:text-violet-400 hover:border-violet-500/30 transition-all shrink-0"
+            title="Attach image or file">
+            <Paperclip size={14} />
           </button>
-          <input value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()}
-            placeholder={`Message ${agent?.name || 'agent'}...`} disabled={thinking}
-            className="flex-1 px-4 py-2 rounded-xl bg-white/5 border border-[#1e1e2e] text-sm focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-slate-200 placeholder-slate-600 transition-all disabled:opacity-50" />
+          <div className="flex-1 relative">
+            <textarea
+              value={inputText}
+              onChange={e => { setInputText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'; }}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+              placeholder={`Message ${agent?.name || 'agent'}... (Enter to send, Shift+Enter for new line)`}
+              disabled={thinking}
+              rows={1}
+              className="w-full px-4 py-2.5 rounded-xl bg-[#0d0d15] border border-[#1e1e2e] text-sm focus:outline-none focus:ring-1 focus:ring-violet-500/40 text-slate-200 placeholder-slate-600 transition-all disabled:opacity-50 resize-none overflow-hidden leading-relaxed"
+              style={{ minHeight: 40, maxHeight: 120 }}
+            />
+          </div>
           <button onClick={sendMessage} disabled={(!inputText.trim() && !uploadedFile) || thinking}
-            className="gradient-btn w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-40">
-            <Send size={13} />
+            className="w-9 h-9 rounded-xl flex items-center justify-center gradient-btn disabled:opacity-40 shrink-0 transition-all hover:scale-105 active:scale-95"
+            title="Send (Enter)">
+            {thinking ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
           </button>
         </div>
-        {usageStats && (
-          <p className="text-xs text-slate-600 mt-2 text-right">
-            {usageStats.messagesUsedToday} / {usageStats.messagesLimitToday} messages today
-          </p>
-        )}
+
+        {/* Footer info */}
+        <div className="flex items-center justify-between mt-1.5">
+          <p className="text-[10px] text-slate-700">👁 Vision models can analyze images</p>
+          {usageStats && (
+            <p className="text-[10px] text-slate-700">{usageStats.messagesUsedToday} / {usageStats.messagesLimitToday} today</p>
+          )}
+        </div>
       </div>
     </div>
-    </div>
   )
-  }
 
   const renderPersonality = () => (
     <div className="space-y-5 bg-[#111118] border border-[#1e1e2e] rounded-xl p-5">
