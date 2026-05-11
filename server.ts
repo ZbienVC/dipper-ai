@@ -1841,6 +1841,29 @@ async function startServer() {
     const agentTools: string[] = (agent as any).tools_enabled || [];
     
     // Tool definitions injected into system prompt
+    // Early image generation for explicit sticker/image requests
+    // Run this BEFORE the slow AI call to avoid timeouts
+    const isExplicitImageRequest = canGenerateImages && (
+      msgL.includes('sticker') || msgL.includes('generate image') || msgL.includes('create image') ||
+      msgL.includes('draw') || (msgL.includes('make') && msgL.includes('image'))
+    );
+    let preGeneratedUrls: string[] = [];
+    if (isExplicitImageRequest) {
+      try {
+        const convRec2 = db.data.conversations.find((c: any) => c.id === convId);
+        const imgCtx2: string = (convRec2 as any)?.image_context?.slice(-1)?.[0] || '';
+        const baseP = imgCtx2
+          ? 'Telegram sticker, cartoon style, transparent background, bold outlines. Character: ' + imgCtx2.slice(0, 150) + '. ' + message.slice(0, 100)
+          : message.slice(0, 400);
+        const cntM = message.match(/(\d+)\s*(sticker|image)/i);
+        const cnt = Math.min(parseInt(cntM?.[1] || '1'), 3);
+        const situations = ['confident and bold', 'shocked expression', 'laughing hysterically'];
+        for (let si = 0; si < cnt; si++) {
+          const p2 = cnt > 1 ? baseP + ', character is ' + situations[si % situations.length] : baseP;
+          const u2 = await generateImage(p2.slice(0, 500));
+          if (u2.startsWith('http')) preGeneratedUrls.push(u2);
+          if (si < cnt - 1) await new Promise(r => setTimeout(r, 800));
+        }
         console.log('[pre-gen] Generated', preGeneratedUrls.length, 'images before AI call');
       } catch (pgErr) { console.error('[pre-gen]', pgErr); }
     }
@@ -1934,29 +1957,6 @@ async function startServer() {
     // Detect sticker/image generation requests - fire DALL-E immediately  
     // Allow image gen if tools explicitly include it OR if agent is a creative template
     const canGenerateImages = agentTools.includes('generate_image') || 
-    // Early image generation for explicit sticker/image requests
-    // Run this BEFORE the slow AI call to avoid timeouts
-    const isExplicitImageRequest = canGenerateImages && (
-      msgL.includes('sticker') || msgL.includes('generate image') || msgL.includes('create image') ||
-      msgL.includes('draw') || (msgL.includes('make') && msgL.includes('image'))
-    );
-    let preGeneratedUrls: string[] = [];
-    if (isExplicitImageRequest) {
-      try {
-        const convRec2 = db.data.conversations.find((c: any) => c.id === convId);
-        const imgCtx2: string = (convRec2 as any)?.image_context?.slice(-1)?.[0] || '';
-        const baseP = imgCtx2
-          ? 'Telegram sticker, cartoon style, transparent background, bold outlines. Character: ' + imgCtx2.slice(0, 150) + '. ' + message.slice(0, 100)
-          : message.slice(0, 400);
-        const cntM = message.match(/(\d+)\s*(sticker|image)/i);
-        const cnt = Math.min(parseInt(cntM?.[1] || '1'), 3);
-        const situations = ['confident and bold', 'shocked expression', 'laughing hysterically'];
-        for (let si = 0; si < cnt; si++) {
-          const p2 = cnt > 1 ? baseP + ', character is ' + situations[si % situations.length] : baseP;
-          const u2 = await generateImage(p2.slice(0, 500));
-          if (u2.startsWith('http')) preGeneratedUrls.push(u2);
-          if (si < cnt - 1) await new Promise(r => setTimeout(r, 800));
-        }
       ['creative-director','content-creator'].includes((agent as any).template_id || '');
     const wantsImageGen = canGenerateImages && (
       // Explicit creation requests
