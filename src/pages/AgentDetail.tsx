@@ -151,6 +151,7 @@ export default function AgentDetail() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadedFile, setUploadedFile] = useState<{ url: string; name: string; type: string; base64?: string } | null>(null)
   const [conversationId, setConversationId] = useState<string | undefined>(undefined)
+  const [thinkingAction, setThinkingAction] = useState<'thinking' | 'generating' | 'searching' | 'sending'>('thinking')
 
   const handleFileUpload = async (file: File) => {
     const localUrl = URL.createObjectURL(file)
@@ -463,6 +464,17 @@ export default function AgentDetail() {
     setMessages(prev => [...prev, userMsg])
     setInputText('')
     setThinking(true)
+    // Detect what kind of action to show
+    const msgLower = (inputText || '').toLowerCase()
+    if (capturedBase64 || msgLower.includes('generat') || msgLower.includes('sticker') || msgLower.includes('image') || msgLower.includes('draw') || msgLower.includes('create') || msgLower.includes('meme')) {
+      setThinkingAction('generating')
+    } else if (msgLower.includes('search') || msgLower.includes('find') || msgLower.includes('research') || msgLower.includes('look up')) {
+      setThinkingAction('searching')
+    } else if (msgLower.includes('email') || msgLower.includes('send')) {
+      setThinkingAction('sending')
+    } else {
+      setThinkingAction('thinking')
+    }
     try {
       let reply: string
       if (token) {
@@ -642,18 +654,44 @@ export default function AgentDetail() {
           </div>
         ))}
 
-        {/* Typing indicator */}
+        {/* Action indicator */}
         {thinking && (
           <div className="flex items-end gap-2.5 justify-start">
             <div className="w-7 h-7 rounded-lg bg-violet-600/20 border border-violet-500/20 flex items-center justify-center flex-shrink-0">
               <Bot size={12} className="text-violet-400" />
             </div>
-            <div className="bg-[#16161f] border border-[#1e1e2e] rounded-[18px] rounded-bl-[4px] px-4 py-3">
-              <div className="flex gap-1.5 items-center">
-                {[0, 150, 300].map(d => (
-                  <span key={d} className="w-1.5 h-1.5 rounded-full bg-violet-400/60 animate-bounce" style={{ animationDelay: `${d}ms` }} />
-                ))}
-              </div>
+            <div className="bg-[#16161f] border border-[#1e1e2e] rounded-[18px] rounded-bl-[4px] px-3 py-2.5">
+              {thinkingAction === 'generating' ? (
+                <div className="flex items-center gap-2.5">
+                  <div className="relative w-5 h-5 shrink-0">
+                    <div className="absolute inset-0 rounded-full border-2 border-violet-500/20" />
+                    <div className="absolute inset-0 rounded-full border-2 border-t-violet-400 animate-spin" />
+                  </div>
+                  <span className="text-xs text-violet-300 font-medium">Generating image...</span>
+                </div>
+              ) : thinkingAction === 'searching' ? (
+                <div className="flex items-center gap-2.5">
+                  <div className="relative w-5 h-5 shrink-0">
+                    <div className="absolute inset-0 rounded-full border-2 border-blue-500/20" />
+                    <div className="absolute inset-0 rounded-full border-2 border-t-blue-400 animate-spin" />
+                  </div>
+                  <span className="text-xs text-blue-300 font-medium">Searching the web...</span>
+                </div>
+              ) : thinkingAction === 'sending' ? (
+                <div className="flex items-center gap-2.5">
+                  <div className="relative w-5 h-5 shrink-0">
+                    <div className="absolute inset-0 rounded-full border-2 border-green-500/20" />
+                    <div className="absolute inset-0 rounded-full border-2 border-t-green-400 animate-spin" />
+                  </div>
+                  <span className="text-xs text-green-300 font-medium">Sending...</span>
+                </div>
+              ) : (
+                <div className="flex gap-1.5 items-center px-0.5">
+                  {[0, 150, 300].map(d => (
+                    <span key={d} className="w-1.5 h-1.5 rounded-full bg-violet-400/60 animate-bounce" style={{ animationDelay: `${d}ms` }} />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
