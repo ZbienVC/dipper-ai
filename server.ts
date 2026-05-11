@@ -1861,11 +1861,13 @@ async function startServer() {
       const mediaType = (mimeMatch?.[1] || 'image/jpeg') as any;
       // Use the actual user message (not history which may have annotations stripped)
       const userText = (message || '').replace(/\[.*?\]/g, '').trim() || 'Describe this image in detail. What do you see? Be specific about colors, subjects, and content.';
-      // Build vision history - clean annotations from previous messages
-      const cleanHistory = history.slice(0, -1).map((m: any) => ({
-        role: m.role as any,
-        content: m.content.replace(/\[IMAGE ANALYZED:[^\]]*\]/g, '').replace(/\[The user has uploaded[^\]]*\]/g, '').replace(/\[User attached:[^\]]*\]/g, '').trim() || m.content,
-      }));
+      // Build clean vision history - no empty messages, strip all annotations
+      const cleanHistory = history.slice(0, -1)
+        .map((m: any) => {
+          const c = m.content.replace(/\[IMAGE[^\]]*\]/g,"").replace(/\[The user[^\]]*\]/g,"").replace(/\[User[^\]]*\]/g,"").trim();
+          return { role: m.role as any, content: c.length > 0 ? c.slice(0,2000) : null };
+        })
+        .filter((m: any) => m.content !== null);
       const visionMsgs = [
         ...cleanHistory,
         { role: 'user' as const, content: [
