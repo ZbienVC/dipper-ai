@@ -1,6 +1,6 @@
-# cache-bust-1778472237687
+# cache-bust-1778508049204
 [phases.install]
-cmds = ["npm install"]
+cmds = ["npm install --include=dev"]
 
 [phases.build]
 cmds = ["npm run build"]
