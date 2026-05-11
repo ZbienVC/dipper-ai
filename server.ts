@@ -1831,6 +1831,16 @@ async function startServer() {
     const plan = PLANS[req.user.plan] || PLANS.free;
     const startTime = Date.now();
     
+    
+    try {
+      const memoryContext = buildMemoryContext(agent.id, req.userId, 'web');
+      const knowledgeContext = buildKnowledgeContext(agent.id, message);
+      const basePrompt = buildAgentSystemPrompt(agent, knowledgeContext ? `${knowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt);
+      const systemPromptWithMemory = memoryContext ? `${memoryContext}\n\n${basePrompt}` : basePrompt;
+      // Tool-aware chat execution
+    const agentTools: string[] = (agent as any).tools_enabled || [];
+    
+    // Tool definitions injected into system prompt
     // Early image generation for explicit sticker/image requests
     // Run this BEFORE the slow AI call to avoid timeouts
     const isExplicitImageRequest = canGenerateImages && (
@@ -1857,16 +1867,6 @@ async function startServer() {
         console.log('[pre-gen] Generated', preGeneratedUrls.length, 'images before AI call');
       } catch (pgErr) { console.error('[pre-gen]', pgErr); }
     }
-    
-    try {
-      const memoryContext = buildMemoryContext(agent.id, req.userId, 'web');
-      const knowledgeContext = buildKnowledgeContext(agent.id, message);
-      const basePrompt = buildAgentSystemPrompt(agent, knowledgeContext ? `${knowledgeContext}\n\n${agent.system_prompt}` : agent.system_prompt);
-      const systemPromptWithMemory = memoryContext ? `${memoryContext}\n\n${basePrompt}` : basePrompt;
-      // Tool-aware chat execution
-    const agentTools: string[] = (agent as any).tools_enabled || [];
-    
-    // Tool definitions injected into system prompt
     // Tool awareness - server handles execution, agent just needs to know what it can do
     const toolCapabilities: Record<string, string> = {
       web_search: 'search the web for current information on any topic',
