@@ -1910,7 +1910,8 @@ async function startServer() {
     // Keyword intent detection - auto-fire tools based on message keywords
     const msgL = message.toLowerCase();
     // Detect sticker/image generation requests - fire DALL-E immediately
-    const wantsImageGen = agentTools.includes('generate_image') && !imageData && (
+    // NOTE: !imageData check removed - follow-up sticker requests should still generate
+    const wantsImageGen = agentTools.includes('generate_image') && (
       // Explicit creation requests
       ((msgL.includes('generat') || msgL.includes('creat') || msgL.includes('draw') || msgL.includes('make') || msgL.includes('design') || msgL.includes('build')) &&
        (msgL.includes('image') || msgL.includes('sticker') || msgL.includes('meme') || msgL.includes('picture') || msgL.includes('logo') || msgL.includes('illustration') || msgL.includes('gif') || msgL.includes('pack'))) ||
@@ -1924,13 +1925,16 @@ async function startServer() {
         // Build a good prompt from the request + any image context
         const convCtxRec = db.data.conversations.find((c: any) => c.id === convId);
         const imgCtx = (convCtxRec as any)?.image_context?.slice(-1)?.[0] || '';
+        // Build prompt from: image context + Claude's own description of what to make
+        const claudeDesc = rawContent.slice(0, 300); // Claude described what it wants to make
         const basePrompt = imgCtx 
-          ? `Telegram sticker style image based on this character: ${imgCtx.slice(0, 200)}. Style: white/transparent background, bold cartoon outlines, expressive face, simple clean design. ${message.slice(0, 100)}`
-          : message.slice(0, 400);
+          ? `Telegram sticker, cartoon style, white background, bold outlines. Character: ${imgCtx.slice(0, 150)}. ${claudeDesc.slice(0, 100)}`
+          : `${claudeDesc.slice(0, 200)} telegram sticker style, white background, bold cartoon outlines, expressive`;
         
         // Check if requesting a pack (multiple stickers)
         const wantsPack = msgL.includes('pack') || (msgL.includes('sticker') && /\d+/.test(msgL));
-        const count = wantsPack ? Math.min(parseInt(msgL.match(/\d+/)?.[0] || '3'), 5) : 1;
+        const countMatch = message.match(/(\d+)\s*(sticker|image)/i);
+        const count = wantsPack ? Math.min(parseInt(countMatch?.[1] || '3'), 4) : 1;
         
         const generatedUrls: string[] = [];
         const situations = wantsPack ? [
@@ -1951,10 +1955,20 @@ async function startServer() {
         }
         
         if (generatedUrls.length > 0) {
-          const imageSection = generatedUrls.map((url, i) => 
-            wantsPack ? `Sticker ${i+1}: ${url}` : url
-          ).join('\n');
-          content = rawContent.replace(/give me a few minutes/gi, "here you go").replace(/i'll show you shortly/gi, "") + '\n\n' + imageSection;
+          const imageSection = generatedUrls.length > 1
+            ? generatedUrls.map((url, i) => `🎭 Sticker ${i+1}:\n${url}`).join('\n\n')
+            : generatedUrls[0];
+          // Clean the text response and append images
+          const cleanText = rawContent
+            .replace(/give me a sec[^.!]*/gi, '')
+            .replace(/give me a moment[^.!]*/gi, '')
+            .replace(/i'll (cook|whip|generate|create)[^.!]*/gi, '')
+            .replace(/cooking up[^.!]*/gi, '')
+            .trim();
+          content = (cleanText || 'Here are your stickers:') + '\n\n' + imageSection;
+        } else {
+          // Generation failed silently - tell user
+          content = rawContent + '\n\n(Image generation failed - try asking again or check OPENAI_API_KEY in Railway settings)';
         }
       } catch (e) { console.error('[intent-img]', e); }
     }
