@@ -1909,9 +1909,11 @@ async function startServer() {
 
     // Keyword intent detection - auto-fire tools based on message keywords
     const msgL = message.toLowerCase();
-    // Detect sticker/image generation requests - fire DALL-E immediately
-    // NOTE: !imageData check removed - follow-up sticker requests should still generate
-    const wantsImageGen = agentTools.includes('generate_image') && (
+    // Detect sticker/image generation requests - fire DALL-E immediately  
+    // Allow image gen if tools explicitly include it OR if agent is a creative template
+    const canGenerateImages = agentTools.includes('generate_image') || 
+      ['creative-director','content-creator'].includes((agent as any).template_id || '');
+    const wantsImageGen = canGenerateImages && (
       // Explicit creation requests
       ((msgL.includes('generat') || msgL.includes('creat') || msgL.includes('draw') || msgL.includes('make') || msgL.includes('design') || msgL.includes('build')) &&
        (msgL.includes('image') || msgL.includes('sticker') || msgL.includes('meme') || msgL.includes('picture') || msgL.includes('logo') || msgL.includes('illustration') || msgL.includes('gif') || msgL.includes('pack'))) ||
@@ -1972,7 +1974,7 @@ async function startServer() {
         }
       } catch (e) { console.error('[intent-img]', e); }
     }
-    if (agentTools.includes('web_search') && !imageData &&
+    if ((agentTools.includes('web_search') || ['research-agent','personal-assistant','crypto-advisor','builder-assistant'].includes((agent as any).template_id || '')) && !imageData &&
         (msgL.includes('search') || msgL.includes('look up') || msgL.includes('find') || msgL.includes('research') || msgL.includes('latest') || msgL.includes('current') || msgL.includes('today'))) {
       try {
         const sr = await webSearch(message, 4);
