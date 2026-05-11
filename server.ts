@@ -1869,7 +1869,7 @@ async function startServer() {
         const b64 = imageData.replace(/^data:image\/[^;]+;base64,/, '');
         const mime = (imageData.match(/^data:(image\/[^;]+);/) || [])[1] || 'image/jpeg';
         const txt = (message || 'Describe this image in detail.').replace(/\[[^\]]*\]/g, '').trim() || 'Describe this image in detail.';
-        const visSys = finalSystemPrompt + '\n\nSTRICT: 2-3 sentences max. No bullet points. No dashes. No markdown. Speak like a creative person texting.';
+        const visSys = finalSystemPrompt + '\n\nSTRICT: 2-3 sentences max. No bullet points. No dashes. No markdown. Never write tool call syntax. Speak like a creative person texting.';
         // Only include prior messages (not current), clean and short
         const priorMsgs = history.slice(0, -1)
           .map((m: any) => ({ role: m.role as any, content: String(m.content || '').replace(/\[[^\]]*\]/g,'').trim().slice(0,1500) }))
