@@ -54,9 +54,9 @@ export default function StickerStudio() {
 
   const uploadAndAnalyze = useCallback(async (file: File) => {
     const localUrl = URL.createObjectURL(file)
-    setAnalyzing(true)
-    setPhase('analyzing')
-    setStatusMsg('Analyzing your character with AI vision...')
+    // Show image immediately before any async work
+    setRefImg({ url: localUrl, base64: '' })
+    setPhase('idle')
     
     // Resize to 1024px max
     const base64 = await new Promise<string>(resolve => {
@@ -73,37 +73,54 @@ export default function StickerStudio() {
       }
       img.src = localUrl
     })
+    // Update with real base64 now that we have it
     setRefImg({ url: localUrl, base64 })
 
-    // Analyze with vision
+    // Analyze with vision - 15s timeout, completely optional
+    setAnalyzing(true)
+    setStatusMsg('Analyzing image... (skip and describe manually if slow)')
     try {
-      // Get any agent id for the vision call
       const agentsRes = await fetch('/api/agents', { headers: { Authorization: `Bearer ${token}` } })
       const agents = await agentsRes.json()
       const agentId = agents[0]?.id
       
       if (agentId) {
-        const body = JSON.stringify({
-          message: 'You are analyzing a character for sticker generation. Describe ONLY: 1) Character type/species (e.g. "green Pepe frog"), 2) Clothing and colors, 3) Distinctive facial features, 4) Art style. Be specific and concise. Max 3 sentences.',
-          model: 'claude-sonnet-4-5',
-          imageData: base64,
-          imageName: file.name,
-        })
-        const res = await fetch(`/api/agents/${agentId}/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body,
-        })
-        const data = await res.json()
-        if (data.content && !data.content.includes('trouble')) {
-          setCharDesc(data.content.replace(/\[.*?\]/g, '').trim().slice(0, 400))
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 15000) // 15s max
+        try {
+          const body = JSON.stringify({
+            message: 'Describe this image briefly for sticker generation. If it has a character: describe species/type, clothing, colors, art style in 2-3 sentences. If no character, describe the main subject/content.',
+            model: 'claude-sonnet-4-5',
+            imageData: base64,
+            imageName: file.name,
+          })
+          const res = await fetch(`/api/agents/${agentId}/chat`, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body,
+          })
+          clearTimeout(timeoutId)
+          const data = await res.json()
+          if (data.content && !data.content.includes('trouble') && !data.content.includes('error')) {
+            setCharDesc(data.content.replace(/\[.*?\]/g, '').trim().slice(0, 400))
+            setStatusMsg('Image analyzed! Edit the description if needed.')
+          } else {
+            setStatusMsg('Could not auto-analyze. Describe your image/character manually below.')
+          }
+        } catch (fetchErr: any) {
+          clearTimeout(timeoutId)
+          if (fetchErr.name === 'AbortError') {
+            setStatusMsg('Analysis timed out. Describe your image/character manually below.')
+          }
         }
       }
-    } catch {}
+    } catch {
+      setStatusMsg('Auto-analysis unavailable. Describe your image/character manually below.')
+    }
     
     setAnalyzing(false)
-    setPhase('idle')
-    setStatusMsg('')
+    if (!charDesc) setPhase('idle')
   }, [token])
 
   const buildPrompt = (concept: string) => {
@@ -347,13 +364,13 @@ export default function StickerStudio() {
 
             {/* Generate button */}
             <button onClick={generateAll}
-              disabled={phase === 'generating' || phase === 'exporting' || phase === 'analyzing' || !charDesc}
+              disabled={phase === 'generating' || phase === 'exporting' || phase === 'analyzing'}
               className="w-full py-4 rounded-2xl font-black text-base text-white flex items-center justify-center gap-3 transition-all disabled:opacity-40"
               style={{ background: (phase==='generating'||phase==='exporting') ? 'rgba(124,58,237,0.4)' : 'linear-gradient(135deg,#7c3aed,#6d28d9)', boxShadow: '0 4px 20px rgba(124,58,237,0.3)' }}>
               {phase === 'generating' ? <><Loader2 size={18} className="animate-spin" /> Generating {genProgress}%...</>
                : phase === 'exporting' ? <><Loader2 size={18} className="animate-spin" /> Uploading to Telegram...</>
                : phase === 'analyzing' ? <><Loader2 size={18} className="animate-spin" /> Analyzing character...</>
-               : !charDesc ? <>Upload or describe your character first</>
+               : <>Upload image or describe your content below, then Generate</>
                : <><Sparkles size={18} /> Generate {Math.min(count, checkedCount)} Stickers</>}
             </button>
 
