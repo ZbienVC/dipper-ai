@@ -5552,6 +5552,34 @@ async function telegramStickerTool(
     res.json({ ok: true });
   });
 
+
+  // ─── Sticker Studio: create pack endpoint ─────────────────────────────────────
+  app.post('/api/community/:agentId/sticker-pack', auth, async (req: any, res: any) => {
+    const { bot_token, pack_name, pack_title, sticker_urls, telegram_user_id = '6705481681', emoji = '🎨' } = req.body;
+    if (!bot_token || !pack_name || !sticker_urls?.length) return res.status(400).json({ error: 'bot_token, pack_name, sticker_urls required' });
+    try {
+      const meRes = await fetch('https://api.telegram.org/bot' + bot_token + '/getMe');
+      const me: any = await meRes.json();
+      const botUsername = me.result?.username || 'bot';
+      const fullName = pack_name.toLowerCase().replace(/[^a-z0-9_]/g,'_').slice(0,32) + '_by_' + botUsername;
+      const createRes = await fetch('https://api.telegram.org/bot' + bot_token + '/createNewStickerSet', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: parseInt(telegram_user_id), name: fullName, title: pack_title || pack_name, stickers: [{ sticker: sticker_urls[0], emoji_list: [emoji], format: 'static' }], sticker_format: 'static' }),
+      });
+      const cd: any = await createRes.json();
+      const packUrl = 'https://t.me/addstickers/' + fullName;
+      if (!cd.ok) return res.json({ success: false, error: cd.description, pack_url: packUrl });
+      for (const url of sticker_urls.slice(1)) {
+        await fetch('https://api.telegram.org/bot' + bot_token + '/addStickerToSet', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: parseInt(telegram_user_id), name: fullName, sticker: { sticker: url, emoji_list: [emoji], format: 'static' } }),
+        }).catch(() => {});
+        await new Promise(r => setTimeout(r, 300));
+      }
+      res.json({ ok: true, pack_url: packUrl, pack_name: fullName });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // ─── Platform Guide AI ────────────────────────────────────────────────────
   app.post('/api/platform-guide', async (req: any, res: any) => {
     const { messages } = req.body;
