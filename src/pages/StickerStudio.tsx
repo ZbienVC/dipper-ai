@@ -103,7 +103,7 @@ export default function StickerStudio() {
           clearTimeout(timeoutId)
           const data = await res.json()
           if (data.content && !data.content.includes('trouble') && !data.content.includes('error')) {
-            setCharDesc(data.content.replace(/\[.*?\]/g, '').trim().slice(0, 400))
+            setCharDesc(data.content.replace(/\[.*?\]/g, '').replace(/^[a-z]$/i, '').trim() || data.content.trim())
             setStatusMsg('Image analyzed! Edit the description if needed.')
           } else {
             setStatusMsg('Could not auto-analyze. Describe your image/character manually below.')
@@ -261,7 +261,7 @@ export default function StickerStudio() {
                 </div>
               ) : (
                 <textarea value={charDesc} onChange={e => setCharDesc(e.target.value)} placeholder="Or describe your character manually..." rows={3}
-                  className="w-full px-3 py-2 rounded-xl bg-white/5 border border-[#1e1e2e] text-xs text-white placeholder-slate-600 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500/40" />
+                  className="w-full px-3 py-2 rounded-xl bg-white/5 border border-[#1e1e2e] text-xs text-white placeholder-slate-600 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500/40" rows={5} />
               )}
             </div>
 
