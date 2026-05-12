@@ -76,48 +76,30 @@ export default function StickerStudio() {
     // Update with real base64 now that we have it
     setRefImg({ url: localUrl, base64 })
 
-    // Analyze with vision - 15s timeout, completely optional
+    // Skip auto-analysis if server is on old code - just set a helpful placeholder
     setAnalyzing(true)
-    setStatusMsg('Analyzing image... (skip and describe manually if slow)')
+    setStatusMsg('Ready! Add a description below to get better results, or generate directly.')
+    // Try quick vision analysis
     try {
       const agentsRes = await fetch('/api/agents', { headers: { Authorization: `Bearer ${token}` } })
-      const agents = await agentsRes.json()
-      const agentId = agents[0]?.id
-      
-      if (agentId) {
+      const ags = await agentsRes.json()
+      const aid = ags[0]?.id
+      if (aid) {
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 15000) // 15s max
+        const tid = setTimeout(() => controller.abort(), 12000)
+        const vb = JSON.stringify({ message: 'In 2-3 sentences, describe the main subject of this image focusing on: appearance, colors, clothing/features, art style. Be specific.', model: 'claude-sonnet-4-5', imageData: base64, imageName: file.name })
         try {
-          const body = JSON.stringify({
-            message: 'Describe this image briefly for sticker generation. If it has a character: describe species/type, clothing, colors, art style in 2-3 sentences. If no character, describe the main subject/content.',
-            model: 'claude-sonnet-4-5',
-            imageData: base64,
-            imageName: file.name,
-          })
-          const res = await fetch(`/api/agents/${agentId}/chat`, {
-            method: 'POST',
-            signal: controller.signal,
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body,
-          })
-          clearTimeout(timeoutId)
-          const data = await res.json()
-          if (data.content && !data.content.includes('trouble') && !data.content.includes('error')) {
-            setCharDesc(data.content.replace(/\[.*?\]/g, '').replace(/^[a-z]$/i, '').trim() || data.content.trim())
-            setStatusMsg('Image analyzed! Edit the description if needed.')
-          } else {
-            setStatusMsg('Could not auto-analyze. Describe your image/character manually below.')
+          const vr = await fetch('/api/agents/' + aid + '/chat', { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: vb })
+          clearTimeout(tid)
+          const vd = await vr.json()
+          const desc = (vd.content || '').replace(/\[.*?\]/g, '').trim()
+          if (desc.length > 5) {
+            setCharDesc(desc)
+            setStatusMsg('Image analyzed! Edit description if needed.')
           }
-        } catch (fetchErr: any) {
-          clearTimeout(timeoutId)
-          if (fetchErr.name === 'AbortError') {
-            setStatusMsg('Analysis timed out. Describe your image/character manually below.')
-          }
-        }
+        } catch { clearTimeout(tid) }
       }
-    } catch {
-      setStatusMsg('Auto-analysis unavailable. Describe your image/character manually below.')
-    }
+    } catch {}
     
     setAnalyzing(false)
     if (!charDesc) setPhase('idle')
@@ -149,13 +131,15 @@ export default function StickerStudio() {
       
       try {
         const prompt = buildPrompt(active[i].label)
-        const res = await fetch('/api/tools/generate-image', {
+        // Use /api/gen - simple DALL-E proxy that works even with older Railway deploys
+        const genRes = await fetch('/api/gen', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ prompt: prompt.slice(0, 500), size: '1024x1024' }),
+          body: JSON.stringify({ p: prompt.slice(0, 500) }),
         })
-        const data = await res.json()
-        results.push({ url: data.url || '', prompt: active[i].label, ok: !!data.url })
+        const genData = await genRes.json()
+        if (genData.e) console.error('[sticker-gen]', genData.e)
+        results.push({ url: genData.u || '', prompt: active[i].label, ok: !!genData.u })
       } catch {
         results.push({ url: '', prompt: active[i].label, ok: false })
       }
