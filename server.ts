@@ -504,6 +504,11 @@ async function callAI(provider: string, model: string, systemPrompt: string, mes
 function cleanAgentResponse(text: string): string {
   let clean = text
     // Strip common AI slop openers
+    .replace(/createtelegramsticker\s*\([^)]*\)/gi, '')
+    .replace(/generate_image\s*\([^)]*\)/gi, '')
+    .replace(/TOOL:[a-z_]+\s*\([^)]*\)/gi, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`]+`/g, (m) => m.replace(/createtelegramsticker[^`]*/gi, ''))
     .replace(/^(Analyzing[^!]*!\s*|Great[^!]*!\s*|Sure[^!]*!\s*|Absolutely[^!]*!\s*|Of course[^!]*!\s*|I'd be happy[^!]*!\s*)/i, '')
     // Strip XML/function_call leakage
     .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '')
@@ -1832,8 +1837,8 @@ async function startServer() {
     // Tool awareness - server handles execution, agent just needs to know what it can do
     const toolCapabilities: Record<string, string> = {
       web_search: 'search the web for current information on any topic',
-      generate_image: 'generate images using AI (DALL-E 3) from text descriptions. Call TOOL:generate_image("detailed prompt") to create an image.',
-      create_telegram_sticker: 'create a sticker-optimized image ready for Telegram. Call TOOL:create_telegram_sticker("description") to generate.',
+      generate_image: 'generate images using AI (DALL-E 3) from text descriptions. Images are generated automatically when you describe what to create - do NOT write function call syntax.',
+      create_telegram_sticker: 'create sticker-optimized images for Telegram. Images are generated automatically - do NOT write function call syntax like createtelegramsticker().',
       send_email: 'send emails on behalf of the user',
       create_lead: 'save contact information to the CRM',
       get_time: 'get the current date and time',
@@ -1908,7 +1913,12 @@ async function startServer() {
     const msgLow = message.toLowerCase();
     const hasImgTool = agentTools.includes('generate_image');
     // Generate image if sticker/image requested (works with or without an uploaded image)
-    const isImgReq = hasImgTool && (msgLow.includes('sticker') || msgLow.includes('generat') || msgLow.includes('create'));
+    // Detect image requests - be aggressive to catch all cases
+    const isImgReq = hasImgTool && (
+      msgLow.includes('sticker') || msgLow.includes('pack') ||
+      ((msgLow.includes('generat') || msgLow.includes('creat') || msgLow.includes('make') || msgLow.includes('draw')) &&
+       (msgLow.includes('image') || msgLow.includes('meme') || msgLow.includes('picture') || msgLow.includes('logo') || msgLow.includes('design')))
+    );
     if (isImgReq) {
       try {
         const convR = db.data.conversations.find((c: any) => c.id === convId);
