@@ -1903,6 +1903,21 @@ async function startServer() {
     // Parse and execute any tool calls in the response
     let content = rawContent;
 
+    // Auto-generate images when sticker/image requests detected
+    const msgLow = message.toLowerCase();
+    const hasImgTool = agentTools.includes('generate_image');
+    const isImgReq = hasImgTool && (msgLow.includes('sticker') || msgLow.includes('generat') || msgLow.includes('creat')) && !imageData;
+    if (isImgReq) {
+      try {
+        const convR = db.data.conversations.find((c: any) => c.id === convId);
+        const imgCtx: string = (convR as any)?.image_context?.slice(-1)?.[0] || '';
+        const prompt = imgCtx ? 'Telegram sticker cartoon style: ' + imgCtx.slice(0, 150) + '. ' + message.slice(0, 100) : message.slice(0, 400);
+        const genUrl = await generateImage(prompt.slice(0, 500));
+        if (genUrl.startsWith('http')) content = rawContent + '\n\n' + genUrl;
+      } catch (ge) { console.error('[img-gen]', ge); }
+    }
+
+
     // Keyword intent detection - auto-fire tools based on message keywords
     const msgL = message.toLowerCase();
     if (agentTools.includes('generate_image') && !imageData &&
