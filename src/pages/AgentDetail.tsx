@@ -10,132 +10,41 @@ import {
 
 function MsgText({ text }: { text: string }) {
   const [exp, setExp] = React.useState(false)
-  // Split text into parts: regular text and image URLs
-  const parts = text.split(/(https://[^\s]+\.(?:png|jpg|jpeg|gif|webp)[^\s]*|https:\/\/oaidalleapiprodscus\.blob\.core\.windows\.net\/[^\s]+)/gi)
-  const hasImages = parts.some(p => p.match(/https:\/\/[^\s]+\.(?:png|jpg|jpeg|gif|webp)/i) || p.includes('oaidalleapiprodscus'))
-  const textOnly = parts.filter(p => !p.match(/https:\/\/[^\s]+\.(?:png|jpg|jpeg|gif|webp)/i) && !p.includes('oaidalleapiprodscus')).join('')
-  const isLong = !hasImages && textOnly.length > 280
-  return (
-    <div style={{ wordBreak: 'break-word' }}>
-      {parts.map((part, i) => {
-        const isImg = part.match(/https:\/\/[^\s]+\.(?:png|jpg|jpeg|gif|webp)/i) || part.includes('oaidalleapiprodscus')
-        if (isImg) return (
-          <div key={i} style={{ margin: '8px 0' }}>
-            <img src={part} alt="Generated image" style={{ maxWidth: '100%', maxHeight: 280, borderRadius: 12, border: '1px solid rgba(139,92,246,0.3)', display: 'block' }}
-              onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
-          </div>
-        )
-        return <span key={i}>{isLong && !exp ? part.slice(0, 260) + '...' : part}</span>
-      })}
-      {isLong && (
-        <button onClick={() => setExp(e => !e)}
-          style={{ display: 'block', marginTop: 4, fontSize: 11, color: '#a78bfa', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
-          {exp ? 'Show less' : 'Read more'}
-        </button>
-      )}
-    </div>
-  )
-}
-
-: { text: string }) {
-  const [exp, setExp] = useState(false)
-  const isLong = text.length > 280
-  const display = isLong && !exp ? text.slice(0, 260) + '...' : text
-  return (
-    <div style={{ wordBreak: 'break-word' }}>
-      <span style={{ whiteSpace: 'pre-wrap' }}>{display}</span>
-      {isLong && (
-        <button onClick={() => setExp(e => !e)}
-          style={{ display: 'block', marginTop: 4, fontSize: 11, color: '#a78bfa', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
-          {exp ? 'Show less' : 'Read more'}
-        </button>
-      )}
-    </div>
-  )
-}
-
-
-const TABS = [
-  { id: 'overview', label: 'Overview', icon: Activity },
-  { id: 'chat', label: 'Chat', icon: MessageSquare },
-  { id: 'users', label: 'Users', icon: Users },
-  { id: 'personality', label: 'Personality', icon: User },
-  { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
-  { id: 'commands', label: 'Commands', icon: Terminal },
-  { id: 'integrations', label: 'Integrations', icon: Plug },
-  { id: 'deploy', label: 'Deploy', icon: Globe },
-  { id: 'analytics', label: 'Analytics', icon: BarChart2 },
-  { id: 'settings', label: 'Settings', icon: Settings },
-]
-
-interface ChatMsg { role: 'user' | 'agent'; text: string; ts: string; imageUrl?: string }
-interface Command { trigger: string; response: string; description?: string }
-
-function getTime() {
-  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function getToken() {
-  try { return JSON.parse(localStorage.getItem('dipperai_user') || '{}').token } catch { return null }
-}
-
-const inputClass = "w-full px-4 py-2.5 rounded-xl bg-white/5 border border-[#1e1e2e] focus:outline-none focus:ring-1 focus:ring-violet-500/50 text-white placeholder-slate-600 text-sm transition-all"
-
-
-const MODELS_DATA = [
-  { id: 'claude-sonnet-4-5', label: 'Sonnet 3.5', tag: '👁 Vision', desc: 'Best all-rounder. Balanced speed, quality and image analysis.', provider: 'Anthropic' },
-  { id: 'claude-haiku-4-5', label: 'Haiku 3', tag: '⚡ Fastest', desc: 'Cheapest and fastest. Text only, no image support.', provider: 'Anthropic' },
-  { id: 'claude-opus-4-5', label: 'Opus', tag: '👁 Deepest', desc: 'Most powerful reasoning. Best for complex research and long docs.', provider: 'Anthropic' },
-  { id: 'gpt-4o', label: 'GPT-4o', tag: '👁 Vision', desc: 'Great for code, data and structured output. Supports images.', provider: 'OpenAI' },
-  { id: 'gpt-4o-mini', label: 'GPT-4o Mini', tag: '💡 Affordable', desc: 'Good writing and outreach at lower cost. Text only.', provider: 'OpenAI' },
-  { id: 'gemini-1.5-flash', label: 'Gemini Flash', tag: '📄 Long docs', desc: 'Huge context window. Best for very long documents.', provider: 'Google' },
-]
-
-function ModelPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [open, setOpen] = React.useState(false)
-  const current = MODELS_DATA.find(m => m.id === value) || MODELS_DATA[0]
-  const ref = React.useRef<HTMLDivElement>(null)
-
-  React.useEffect(() => {
-    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
-  return (
-    <div ref={ref} className="relative shrink-0" style={{ minWidth: 130 }}>
-      {/* Closed state - compact pill */}
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0d0d15] border border-[#1e1e2e] text-white text-xs hover:border-violet-500/30 transition-all w-full"
-      >
-        <span className="font-semibold truncate">{current.label}</span>
-        <span className="text-[10px] text-violet-400 shrink-0">{current.tag.split(' ')[0]}</span>
-        <svg className="ml-auto shrink-0 text-slate-500" style={{ rotate: open ? '180deg' : '0deg', transition: 'rotate 0.15s' }} width="10" height="10" viewBox="0 0 10 10"><path d="M1 3l4 4 4-4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>
-      </button>
-
-      {/* Open state - full detail dropdown */}
-      {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 w-72 rounded-xl overflow-hidden shadow-2xl"
-          style={{ background: '#0f0f1a', border: '1px solid rgba(255,255,255,0.08)' }}>
-          {MODELS_DATA.map(m => (
-            <button
-              key={m.id}
-              onClick={() => { onChange(m.id); setOpen(false) }}
-              className="w-full flex items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-white/4"
-              style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className={`text-sm font-semibold ${m.id === value ? 'text-violet-400' : 'text-white'}`}>{m.label}</span>
-                  <span className="text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5 shrink-0">{m.tag}</span>
-                  {m.id === value && <span className="ml-auto text-[10px] text-violet-400">● Active</span>}
-                </div>
-                <p className="text-[11px] text-slate-500 leading-relaxed">{m.desc}</p>
+  const isLong = text.length > 280 && !text.includes('https://')
+  
+  // Check if response contains image URLs
+  const urlPattern = 'https://oaidalleapiprodscus'
+  const hasImages = text.includes(urlPattern)
+  
+  if (hasImages) {
+    // Split on newlines and render URLs as images
+    const parts = text.split('\n')
+    return (
+      <div style={{ wordBreak: 'break-word' }}>
+        {parts.map((part, i) => {
+          const trimmed = part.trim()
+          if (trimmed.startsWith('https://oaidalleapiprodscus') || trimmed.startsWith('https://oaidalle')) {
+            return (
+              <div key={i} style={{ margin: '8px 0' }}>
+                <img src={trimmed} alt="Generated sticker" style={{ maxWidth: 220, maxHeight: 220, borderRadius: 12, border: '1px solid rgba(139,92,246,0.3)', display: 'block' }}
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
               </div>
-            </button>
-          ))}
-        </div>
+            )
+          }
+          return trimmed ? <div key={i}>{trimmed}</div> : null
+        })}
+      </div>
+    )
+  }
+  
+  return (
+    <div style={{ wordBreak: 'break-word' }}>
+      <span style={{ whiteSpace: 'pre-wrap' }}>{isLong && !exp ? text.slice(0, 260) + '...' : text}</span>
+      {isLong && (
+        <button onClick={() => setExp(e => !e)}
+          style={{ display: 'block', marginTop: 4, fontSize: 11, color: '#a78bfa', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
+          {exp ? 'Show less' : 'Read more'}
+        </button>
       )}
     </div>
   )
