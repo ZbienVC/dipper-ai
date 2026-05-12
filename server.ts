@@ -5611,6 +5611,25 @@ async function telegramStickerTool(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+
+  // Simple DALL-E proxy - just forwards to OpenAI, works with current Railway code
+  app.post('/api/gen', auth, async (req: any, res: any) => {
+    const { p } = req.body; // p = prompt
+    if (!p) return res.status(400).json({ u: null, e: 'no prompt' });
+    const k = process.env.OPENAI_API_KEY;
+    if (!k) return res.status(400).json({ u: null, e: 'no key' });
+    try {
+      const r = await fetch('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + k, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'dall-e-3', prompt: p.slice(0, 1000), n: 1, size: '1024x1024', quality: 'standard' }),
+      });
+      const d: any = await r.json();
+      const u = d.data?.[0]?.url || null;
+      res.json({ u, e: d.error?.message || null });
+    } catch (e: any) { res.json({ u: null, e: e.message }); }
+  });
+
   // ─── Platform Guide AI ────────────────────────────────────────────────────
   app.post('/api/platform-guide', async (req: any, res: any) => {
     const { messages } = req.body;
