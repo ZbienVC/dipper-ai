@@ -9,6 +9,35 @@ import {
 } from 'lucide-react'
 
 function MsgText({ text }: { text: string }) {
+  const [exp, setExp] = React.useState(false)
+  // Split text into parts: regular text and image URLs
+  const parts = text.split(/(https://[^\s]+\.(?:png|jpg|jpeg|gif|webp)[^\s]*|https:\/\/oaidalleapiprodscus\.blob\.core\.windows\.net\/[^\s]+)/gi)
+  const hasImages = parts.some(p => p.match(/https:\/\/[^\s]+\.(?:png|jpg|jpeg|gif|webp)/i) || p.includes('oaidalleapiprodscus'))
+  const textOnly = parts.filter(p => !p.match(/https:\/\/[^\s]+\.(?:png|jpg|jpeg|gif|webp)/i) && !p.includes('oaidalleapiprodscus')).join('')
+  const isLong = !hasImages && textOnly.length > 280
+  return (
+    <div style={{ wordBreak: 'break-word' }}>
+      {parts.map((part, i) => {
+        const isImg = part.match(/https:\/\/[^\s]+\.(?:png|jpg|jpeg|gif|webp)/i) || part.includes('oaidalleapiprodscus')
+        if (isImg) return (
+          <div key={i} style={{ margin: '8px 0' }}>
+            <img src={part} alt="Generated image" style={{ maxWidth: '100%', maxHeight: 280, borderRadius: 12, border: '1px solid rgba(139,92,246,0.3)', display: 'block' }}
+              onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
+          </div>
+        )
+        return <span key={i}>{isLong && !exp ? part.slice(0, 260) + '...' : part}</span>
+      })}
+      {isLong && (
+        <button onClick={() => setExp(e => !e)}
+          style={{ display: 'block', marginTop: 4, fontSize: 11, color: '#a78bfa', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
+          {exp ? 'Show less' : 'Read more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+: { text: string }) {
   const [exp, setExp] = useState(false)
   const isLong = text.length > 280
   const display = isLong && !exp ? text.slice(0, 260) + '...' : text
