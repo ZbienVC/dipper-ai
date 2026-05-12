@@ -5580,6 +5580,37 @@ async function telegramStickerTool(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+
+  // ─── General Sticker Pack Creation (Sticker Studio) ───────────────────────────
+  app.post('/api/sticker-pack', auth, async (req: any, res: any) => {
+    const { bot_token, pack_name, pack_title, sticker_urls, telegram_user_id = '6705481681', emoji = '🎭' } = req.body;
+    if (!bot_token || !pack_name || !sticker_urls?.length) return res.status(400).json({ error: 'bot_token, pack_name, sticker_urls required' });
+    try {
+      const meR = await fetch('https://api.telegram.org/bot' + bot_token + '/getMe');
+      const me: any = await meR.json();
+      if (!me.ok) return res.status(400).json({ error: 'Invalid bot token: ' + me.description });
+      const botUsername = me.result.username;
+      const safeName = pack_name.toLowerCase().replace(/[^a-z0-9_]/g,'_').slice(0,30) + '_by_' + botUsername;
+      // Create sticker set
+      const cr = await fetch('https://api.telegram.org/bot' + bot_token + '/createNewStickerSet', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: parseInt(telegram_user_id), name: safeName, title: pack_title || pack_name, stickers: [{ sticker: sticker_urls[0], emoji_list: [emoji], format: 'static' }], sticker_format: 'static' }),
+      });
+      const cd: any = await cr.json();
+      const packUrl = 'https://t.me/addstickers/' + safeName;
+      if (!cd.ok) return res.json({ success: false, error: cd.description, pack_url: packUrl });
+      // Add remaining
+      for (const url of sticker_urls.slice(1)) {
+        await fetch('https://api.telegram.org/bot' + bot_token + '/addStickerToSet', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: parseInt(telegram_user_id), name: safeName, sticker: { sticker: url, emoji_list: [emoji], format: 'static' } }),
+        }).catch(() => {});
+        await new Promise(r => setTimeout(r, 350));
+      }
+      res.json({ ok: true, pack_url: packUrl, pack_name: safeName, stickers_added: sticker_urls.length });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // ─── Platform Guide AI ────────────────────────────────────────────────────
   app.post('/api/platform-guide', async (req: any, res: any) => {
     const { messages } = req.body;
