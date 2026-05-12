@@ -501,8 +501,20 @@ export default function AgentDetail() {
         clearTimeout(timeoutId)
         const data = await res.json()
         reply = data.content || data.error || 'Something went wrong.'
-        // Store conversationId to maintain context across messages
         if (data.conversationId) setConversationId(data.conversationId)
+        // Client-side fallback: if sticker request but no image URL in response, generate directly
+        const wantedImg = (currentInput || '').toLowerCase().includes('sticker') || (currentInput || '').toLowerCase().includes('generat')
+        const hasImgUrl = reply.includes('https://oaidalle') || (reply.includes('https://') && reply.includes('.png'))
+        if (wantedImg && !hasImgUrl && token) {
+          try {
+            setThinkingAction('generating')
+            const gp = (reply.slice(0, 150) || currentInput) + ' telegram sticker style, cartoon, bold outlines'
+            const gb = JSON.stringify({ prompt: gp.slice(0, 400), size: '1024x1024' })
+            const gr = await fetch('/api/tools/generate-image', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: gb })
+            const gd = await gr.json()
+            if (gd.url && gd.is_image) reply = reply + '\n\n' + gd.url
+          } catch (ge) { console.error('[client-img]', ge) }
+        }
         
         // Client-side image generation: if response mentions generating but has no URLs,
         // and the original request was for stickers/images, generate client-side
