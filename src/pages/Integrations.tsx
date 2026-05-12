@@ -23,10 +23,11 @@ const INTEGRATION_META: Record<string, {
   fields: { key: string; label: string; placeholder: string; type?: string }[]
 }> = {
   telegram: {
-    name: 'Telegram',
-    description: 'Deploy your agents as Telegram bots. Reach your audience where they already are.',
+    name: 'Telegram Bot',
+    description: 'Connect a Telegram bot to your agent. Users can chat with your agent directly in Telegram.',
     icon: '✈️',
-    instructions: '1. Open Telegram and search for @BotFather\n2. Send /newbot and follow the prompts to create your bot\n3. BotFather will give you a Bot Token — copy it\n4. Paste the token below and click Connect\n5. DipperAI will automatically set up the webhook for you',
+    color: '#0088cc',
+    instructions: '1. Open Telegram and search @BotFather\n2. Send /newbot and follow prompts to name your bot\n3. Copy the API token BotFather gives you (format: 123456:ABCdef...)\n4. Paste it below and click Connect\n5. Done! Your agent will auto-configure the webhook',
     webhookPath: '/webhooks/telegram',
     fields: [
       { key: 'botToken', label: 'Bot Token', placeholder: '123456789:ABCDefgh...', type: 'password' },
@@ -211,6 +212,7 @@ export default function Integrations() {
 
   const getRecord = (type: string) => records.find(r => r.type === type)
 
+  const APP_URL = window.location.origin;
   const types = ['telegram', 'discord', 'sms', 'twitter'] as const
   const meta = activeType ? INTEGRATION_META[activeType] : null
 
