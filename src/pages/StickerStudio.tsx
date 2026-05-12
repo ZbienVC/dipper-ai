@@ -369,8 +369,7 @@ export default function StickerStudio() {
               style={{ background: (phase==='generating'||phase==='exporting') ? 'rgba(124,58,237,0.4)' : 'linear-gradient(135deg,#7c3aed,#6d28d9)', boxShadow: '0 4px 20px rgba(124,58,237,0.3)' }}>
               {phase === 'generating' ? <><Loader2 size={18} className="animate-spin" /> Generating {genProgress}%...</>
                : phase === 'exporting' ? <><Loader2 size={18} className="animate-spin" /> Uploading to Telegram...</>
-               : phase === 'analyzing' ? <><Loader2 size={18} className="animate-spin" /> Analyzing character...</>
-               : <>Upload image or describe your content below, then Generate</>
+               : phase === 'analyzing' ? <><Loader2 size={18} className="animate-spin" /> Analyzing image...</>
                : <><Sparkles size={18} /> Generate {Math.min(count, checkedCount)} Stickers</>}
             </button>
 
