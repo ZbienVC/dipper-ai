@@ -1852,6 +1852,7 @@ async function startServer() {
     let rawContent: string;
     let tokensUsed: number;
     console.log('[auth-chat] imageData present:', !!imageData, 'length:', imageData?.length || 0, 'provider:', activeProvider, 'model:', effectiveModel);
+    console.log('[vision-check] imageData:', !!imageData, 'len:', imageData?.length||0, 'provider:', activeProvider);
     if (imageData && activeProvider === 'anthropic') {
       // Vision API - analyze image with Claude
       try {
@@ -1906,7 +1907,8 @@ async function startServer() {
     // Auto-generate images when sticker/image requests detected
     const msgLow = message.toLowerCase();
     const hasImgTool = agentTools.includes('generate_image');
-    const isImgReq = hasImgTool && (msgLow.includes('sticker') || msgLow.includes('generat') || msgLow.includes('creat')) && !imageData;
+    // Generate image if sticker/image requested (works with or without an uploaded image)
+    const isImgReq = hasImgTool && (msgLow.includes('sticker') || msgLow.includes('generat') || msgLow.includes('create'));
     if (isImgReq) {
       try {
         const convR = db.data.conversations.find((c: any) => c.id === convId);
@@ -5031,7 +5033,8 @@ async function webSearch(query: string, numResults = 5): Promise<string> {
 // Image Generation: DALL-E 3 via OpenAI
 async function generateImage(prompt: string, size: '1024x1024' | '1792x1024' | '1024x1792' = '1024x1024'): Promise<string> {
   const openaiKey = process.env.OPENAI_API_KEY;
-  if (!openaiKey) return 'I need an OpenAI API key to generate images. The owner needs to add OPENAI_API_KEY to Railway environment variables.';
+  console.log('[img-gen] OPENAI_API_KEY present:', !!openaiKey, 'prompt:', prompt.slice(0,50));
+  if (!openaiKey) return 'Image generation requires OPENAI_API_KEY in Railway environment variables. The owner needs to add OPENAI_API_KEY to Railway environment variables.';
   try {
     const r = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
