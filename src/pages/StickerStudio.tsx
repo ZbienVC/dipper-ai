@@ -41,6 +41,12 @@ export default function StickerStudio() {
   const [custom, setCustom] = useState('')
   
   // Telegram
+
+  const [showKeyInput, setShowKeyInput] = useState(false)
+  const [keyInput, setKeyInput] = useState(localStorage.getItem('oai_key') || '')
+  const saveKey = () => { localStorage.setItem('oai_key', keyInput); setShowKeyInput(false); setError('') }
+  const hasKey = !!localStorage.getItem('oai_key')
+
   const [packName, setPackName] = useState('')
   const [botToken, setBotToken] = useState('')
   const [autoExport, setAutoExport] = useState(false)
@@ -85,19 +91,22 @@ export default function StickerStudio() {
       const ags = await agentsRes.json()
       const aid = ags[0]?.id
       if (aid) {
-        const controller = new AbortController()
-        const tid = setTimeout(() => controller.abort(), 12000)
-        const vb = JSON.stringify({ message: 'In 2-3 sentences, describe the main subject of this image focusing on: appearance, colors, clothing/features, art style. Be specific.', model: 'claude-sonnet-4-5', imageData: base64, imageName: file.name })
         try {
+          const controller = new AbortController()
+          const tid = setTimeout(() => controller.abort(), 12000)
+          const vb = JSON.stringify({ message: 'Describe this image in 2 sentences: what is it, what does it look like, what style.', model: 'claude-sonnet-4-5', imageData: base64, imageName: file.name })
           const vr = await fetch('/api/agents/' + aid + '/chat', { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: vb })
           clearTimeout(tid)
           const vd = await vr.json()
-          const desc = (vd.content || '').replace(/\[.*?\]/g, '').trim()
-          if (desc.length > 5) {
-            setCharDesc(desc)
-            setStatusMsg('Image analyzed! Edit description if needed.')
+          const desc = String(vd.content || vd.error || '').replace(/\[.*?\]/g, '').trim()
+          console.log('[vision] desc length:', desc.length, 'first 50:', desc.slice(0,50))
+          if (desc.length > 10) {
+            setCharDesc(desc.slice(0, 500))
+            setStatusMsg('Got it! Edit description if needed.')
+          } else {
+            setStatusMsg('Type a description of your character/image below.')
           }
-        } catch { clearTimeout(tid) }
+        } catch (ve) { console.error('[vision]', ve); setStatusMsg('Add a description below to get better results.') }
       }
     } catch {}
     
@@ -131,15 +140,22 @@ export default function StickerStudio() {
       
       try {
         const prompt = buildPrompt(active[i].label)
-        // Use /api/gen - simple DALL-E proxy that works even with older Railway deploys
-        const genRes = await fetch('/api/gen', {
+        // Call DALL-E directly from frontend (bypasses server caching issues)
+        const openaiKey = localStorage.getItem('oai_key') || ''
+        if (!openaiKey) {
+          results.push({ url: '', prompt: active[i].label, ok: false })
+          if (i === 0) setError('OpenAI key needed. Click Settings below to add it.')
+          continue
+        }
+        const dallERes = await fetch('https://api.openai.com/v1/images/generations', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ p: prompt.slice(0, 500) }),
+          headers: { 'Authorization': 'Bearer ' + openaiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'dall-e-3', prompt: prompt.slice(0, 1000), n: 1, size: '1024x1024', quality: 'standard' }),
         })
-        const genData = await genRes.json()
-        if (genData.e) console.error('[sticker-gen]', genData.e)
-        results.push({ url: genData.u || '', prompt: active[i].label, ok: !!genData.u })
+        const dallEData = await dallERes.json()
+        if (dallEData.error) { console.error('[dalle]', dallEData.error.message); results.push({ url: '', prompt: active[i].label, ok: false }); continue }
+        const imgUrl = dallEData.data?.[0]?.url || ''
+        results.push({ url: imgUrl, prompt: active[i].label, ok: !!imgUrl })
       } catch {
         results.push({ url: '', prompt: active[i].label, ok: false })
       }
@@ -359,6 +375,22 @@ export default function StickerStudio() {
 
             {statusMsg && (
               <p className={`text-sm text-center ${phase==='done'&&packUrl?'text-green-400':'text-slate-400'}`}>{statusMsg}</p>
+            )}
+            
+            {/* API Key settings */}
+            {(!hasKey || showKeyInput) && (
+              <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl p-4">
+                <p className="text-xs font-bold text-amber-400 mb-2">⚡ OpenAI Key Required for Image Generation</p>
+                <p className="text-xs text-slate-400 mb-3">Add your OpenAI API key to generate stickers directly. Key is stored locally only.</p>
+                <div className="flex gap-2">
+                  <input value={keyInput} onChange={e => setKeyInput(e.target.value)} placeholder="sk-proj-..." type="password"
+                    className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-[#1e1e2e] text-xs text-white placeholder-slate-600 font-mono focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+                  <button onClick={saveKey} className="px-4 py-2 rounded-lg text-xs font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 transition-colors">Save</button>
+                </div>
+              </div>
+            )}
+            {hasKey && !showKeyInput && (
+              <button onClick={() => setShowKeyInput(true)} className="text-xs text-slate-600 hover:text-slate-400 transition-colors w-full text-center">⚙️ Change API key</button>
             )}
 
             {/* Results grid */}
