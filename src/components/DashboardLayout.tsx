@@ -37,6 +37,7 @@ const NAV_GROUPS = [
       { icon: CheckSquare, label: 'Approvals', path: '/dashboard/approvals', tooltip: 'Review and approve agent responses before sending' },
       { icon: Activity, label: 'Activity', path: '/dashboard/activity', tooltip: 'See a live log of everything happening' },
       { icon: Film, label: 'Media Editor', path: '/dashboard/media', tooltip: 'Edit videos, images and create stickers with AI', badge: 'NEW' },
+      { icon: Sparkles, label: 'Sticker Studio', path: '/dashboard/sticker-studio', tooltip: 'Create Telegram sticker packs with AI', badge: 'NEW' },
     ],
   },
   {
