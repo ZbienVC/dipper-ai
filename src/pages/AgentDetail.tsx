@@ -382,6 +382,37 @@ export default function AgentDetail() {
     navigate('/dashboard/agents')
   }
 
+  const [generatingSticker, setGeneratingSticker] = useState(false)
+  const [stickerResults, setStickerResults] = useState<string[]>([])
+
+  const generateStickersNow = async (count = 3) => {
+    if (!conversationId || generatingSticker) return
+    setGeneratingSticker(true)
+    const tok = getToken()
+    const results: string[] = []
+    const situations = ['aggressive pointing "BUY THIS" pose', 'crying but smiling holding crypto bag', 'riding rocket going up with excitement', 'laser eyes smug expression', 'face-down on floor rugged', 'screaming into megaphone hype energy']
+    for (let i = 0; i < Math.min(count, 6); i++) {
+      try {
+        // Get image context from conversation
+        const convResp = await fetch('/api/agents/' + id + '/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+          body: JSON.stringify({ message: 'describe the character in this conversation for sticker generation', model: selectedModel, conversationId }),
+        })
+        const ctxData = await convResp.json()
+        const imgCtx = ctxData.content || ''
+        
+        const prompt = (imgCtx.slice(0, 150) || 'Pepe frog character') + `, ${situations[i]}, telegram sticker style, flat cartoon, white background, 512x512px`
+        const gb = JSON.stringify({ prompt: prompt.slice(0, 500), size: '1024x1024' })
+        const gr = await fetch('/api/tools/generate-image', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` }, body: gb })
+        const gd = await gr.json()
+        if (gd.url) results.push(gd.url)
+      } catch {}
+    }
+    setStickerResults(prev => [...prev, ...results])
+    setGeneratingSticker(false)
+  }
+
   const sendMessage = async () => {
     if ((!inputText.trim() && !uploadedFile) || thinking || !agent) return
     // Capture everything BEFORE any state changes
@@ -689,6 +720,38 @@ export default function AgentDetail() {
                 className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#0a0a0f] border border-[#1e1e2e] flex items-center justify-center text-slate-400 hover:text-red-400 transition-colors">
                 <X size={9} />
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Sticker quick action */}
+        {uploadedFile && (
+          <div className="mb-2 flex items-center gap-2">
+            <button onClick={() => generateStickersNow(3)} disabled={generatingSticker}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+              style={{ background: 'linear-gradient(135deg,#7c3aed,#6d28d9)', color: '#fff', boxShadow: '0 2px 12px rgba(124,58,237,0.3)' }}>
+              {generatingSticker ? <><Loader2 size={12} className="animate-spin" /> Generating...</> : '⚡ Generate 3 Stickers Now'}
+            </button>
+            <button onClick={() => generateStickersNow(6)} disabled={generatingSticker}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border border-violet-500/30 text-violet-400 hover:bg-violet-500/10 transition-all disabled:opacity-50">
+              6 Stickers
+            </button>
+          </div>
+        )}
+        {/* Sticker results */}
+        {stickerResults.length > 0 && (
+          <div className="mb-2">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-bold text-violet-300">Generated Stickers</span>
+              <button onClick={() => setStickerResults([])} className="text-xs text-slate-500 hover:text-red-400">Clear</button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {stickerResults.map((url, i) => (
+                <a key={i} href={url} target="_blank" rel="noreferrer">
+                  <img src={url} alt={'Sticker ' + (i+1)} style={{ width: 80, height: 80, borderRadius: 10, border: '1px solid rgba(139,92,246,0.3)', objectFit: 'cover' }}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                </a>
+              ))}
             </div>
           </div>
         )}
