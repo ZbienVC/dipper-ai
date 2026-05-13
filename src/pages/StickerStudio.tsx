@@ -112,11 +112,14 @@ export default function StickerStudio() {
           // Filter out failure messages
           const isFailure = raw.includes("can't see") || raw.includes("cannot see") || raw.includes("vision") || raw.includes("failed") || raw.length < 10
           console.log('[vision] len:', raw.length, 'failure:', isFailure, 'preview:', raw.slice(0,60))
-          if (!isFailure) {
-            setCharDesc(raw.replace(/\[.*?\]/g, '').trim().slice(0, 500))
-            setStatusMsg('Image analyzed! Edit description if needed.')
+          const cleanDesc = raw.replace(/\[.*?\]/g, '').trim()
+          // Only set if we got a real description (not a single char or failure message)
+          const looksReal = cleanDesc.length > 15 && !cleanDesc.includes("can't see") && !cleanDesc.includes("cannot see") && !cleanDesc.includes("vision") && !cleanDesc.includes("failed")
+          if (looksReal) {
+            setCharDesc(cleanDesc.slice(0, 500))
+            setStatusMsg('✓ AI analyzed your image. Edit the description below if needed.')
           } else {
-            setStatusMsg('Auto-analysis unavailable — describe your image/character below to get better results.')
+            setStatusMsg('Describe your character/image in the box below for best results.')
           }
         } catch (ve) { console.error('[vision]', ve); setStatusMsg('Add a description below to get better results.') }
       }
@@ -275,15 +278,15 @@ export default function StickerStudio() {
                 </button>
               )}
               
-              {charDesc ? (
-                <div className="bg-violet-500/8 border border-violet-500/20 rounded-xl p-3">
-                  <p className="text-[10px] font-bold text-violet-400 mb-1">AI Description</p>
-                  <p className="text-xs text-slate-300 leading-relaxed">{charDesc}</p>
-                  <button onClick={() => setCharDesc('')} className="text-[10px] text-slate-600 mt-1 hover:text-slate-400">Edit</button>
-                </div>
-              ) : (
-                <textarea value={charDesc} onChange={e => setCharDesc(e.target.value)} placeholder="Or describe your character manually..." rows={3}
-                  className="w-full px-3 py-2 rounded-xl bg-white/5 border border-[#1e1e2e] text-xs text-white placeholder-slate-600 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500/40" rows={5} />
+              <textarea
+                value={charDesc}
+                onChange={e => setCharDesc(e.target.value)}
+                placeholder="Describe your character or image... (e.g. green Pepe frog face merged with Elon Musk wearing SpaceX jacket, meme art style)"
+                rows={4}
+                className="w-full px-3 py-2 rounded-xl bg-white/5 border border-[#1e1e2e] text-xs text-white placeholder-slate-600 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500/40 leading-relaxed"
+              />
+              {charDesc && analyzing && (
+                <p className="text-[10px] text-violet-400 mt-1">✓ AI analyzed — edit as needed</p>
               )}
             </div>
 
