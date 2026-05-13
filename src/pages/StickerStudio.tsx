@@ -42,6 +42,16 @@ export default function StickerStudio() {
   
   // Telegram
 
+  const [genConvId, setGenConvId] = useState<string>('')
+  const [agentId, setAgentId] = useState<string>('')
+  
+  // Load agent ID on mount
+  React.useEffect(() => {
+    if (!token) return
+    fetch('/api/agents', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json()).then(agents => { if(agents[0]?.id) setAgentId(agents[0].id) }).catch(()=>{})
+  }, [token])
+
   const [showKeyInput, setShowKeyInput] = useState(false)
   const [keyInput, setKeyInput] = useState(localStorage.getItem('oai_key') || '')
   const saveKey = () => { localStorage.setItem('oai_key', keyInput); setShowKeyInput(false); setError('') }
@@ -140,22 +150,30 @@ export default function StickerStudio() {
       
       try {
         const prompt = buildPrompt(active[i].label)
-        // Call DALL-E directly from frontend (bypasses server caching issues)
-        const openaiKey = localStorage.getItem('oai_key') || ''
-        if (!openaiKey) {
+        // Generate via agent chat (server calls DALL-E - works through Railway)
+        try {
+          const genMsg = JSON.stringify({
+            message: 'Generate this image immediately: ' + prompt.slice(0, 400),
+            model: 'claude-sonnet-4-5',
+            conversationId: genConvId || undefined,
+          })
+          const gr = await fetch('/api/agents/' + agentId + '/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: genMsg,
+          })
+          const gd = await gr.json()
+          if (!genConvId && gd.conversationId) setGenConvId(gd.conversationId)
+          const content = gd.content || ''
+          // Extract URL from response
+          const urlMatch = content.match(/(https:\/\/oaidalleapiprodscus[^\s)"]+)/i)
+          const imgUrl = urlMatch?.[1] || ''
+          console.log('[sticker] got url:', !!imgUrl, 'content len:', content.length)
+          results.push({ url: imgUrl, prompt: active[i].label, ok: !!imgUrl })
+        } catch (ge) {
+          console.error('[sticker-gen]', ge)
           results.push({ url: '', prompt: active[i].label, ok: false })
-          if (i === 0) setError('OpenAI key needed. Click Settings below to add it.')
-          continue
         }
-        const dallERes = await fetch('https://api.openai.com/v1/images/generations', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + openaiKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'dall-e-3', prompt: prompt.slice(0, 1000), n: 1, size: '1024x1024', quality: 'standard' }),
-        })
-        const dallEData = await dallERes.json()
-        if (dallEData.error) { console.error('[dalle]', dallEData.error.message); results.push({ url: '', prompt: active[i].label, ok: false }); continue }
-        const imgUrl = dallEData.data?.[0]?.url || ''
-        results.push({ url: imgUrl, prompt: active[i].label, ok: !!imgUrl })
       } catch {
         results.push({ url: '', prompt: active[i].label, ok: false })
       }
