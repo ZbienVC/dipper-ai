@@ -108,13 +108,15 @@ export default function StickerStudio() {
           const vr = await fetch('/api/agents/' + aid + '/chat', { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: vb })
           clearTimeout(tid)
           const vd = await vr.json()
-          const desc = String(vd.content || vd.error || '').replace(/\[.*?\]/g, '').trim()
-          console.log('[vision] desc length:', desc.length, 'first 50:', desc.slice(0,50))
-          if (desc.length > 10) {
-            setCharDesc(desc.slice(0, 500))
-            setStatusMsg('Got it! Edit description if needed.')
+          const raw = String(vd.content || '').trim()
+          // Filter out failure messages
+          const isFailure = raw.includes("can't see") || raw.includes("cannot see") || raw.includes("vision") || raw.includes("failed") || raw.length < 10
+          console.log('[vision] len:', raw.length, 'failure:', isFailure, 'preview:', raw.slice(0,60))
+          if (!isFailure) {
+            setCharDesc(raw.replace(/\[.*?\]/g, '').trim().slice(0, 500))
+            setStatusMsg('Image analyzed! Edit description if needed.')
           } else {
-            setStatusMsg('Type a description of your character/image below.')
+            setStatusMsg('Auto-analysis unavailable — describe your image/character below to get better results.')
           }
         } catch (ve) { console.error('[vision]', ve); setStatusMsg('Add a description below to get better results.') }
       }
@@ -166,8 +168,10 @@ export default function StickerStudio() {
           if (!genConvId && gd.conversationId) setGenConvId(gd.conversationId)
           const content = gd.content || ''
           // Extract URL from response
-          const urlMatch = content.match(/(https:\/\/oaidalleapiprodscus[^\s)"]+)/i)
-          const imgUrl = urlMatch?.[1] || ''
+          // Extract URL from markdown image or bare URL
+          const mdMatch = content.match(/!\[.*?\]\((https:\/\/[^)]+)\)/i)
+          const urlMatch = content.match(/(https:\/\/(?:oaidalleapiprodscus|files\.openai\.com|oaistgeus)[^\s)\"'\]]+)/i)
+          const imgUrl = mdMatch?.[1] || urlMatch?.[1] || ''
           console.log('[sticker] got url:', !!imgUrl, 'content len:', content.length)
           results.push({ url: imgUrl, prompt: active[i].label, ok: !!imgUrl })
         } catch (ge) {
